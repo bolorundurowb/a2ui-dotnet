@@ -48,6 +48,21 @@
       "checksum": "679b0a1da4f678f369f06ea611469b5f8e367154"
     },
     {
+      "path": "blueprints/modules/a2ui_framework_adapter.blueprint.md",
+      "type": "blob",
+      "checksum": "d859a5e23766284ea8d277ade2460ed20aee2eb7"
+    },
+    {
+      "path": "catalogs/mcp/v1",
+      "type": "tree",
+      "checksum": "9edc538179786a4b953cb8ad6290a92fc86d2503"
+    },
+    {
+      "path": "catalogs/vegachart/v1",
+      "type": "tree",
+      "checksum": "6899d6624915a786dd9cb3b1e5b27875e97a3de4"
+    },
+    {
       "path": "conformance",
       "type": "tree",
       "checksum": "578ad4e38d23a6d247d9f1d0624b247d9e91738f"
@@ -86,6 +101,7 @@
         "Prompts and examples",
         "Direct JSON batch and streaming",
         "Express batch",
+        "Express streaming and macros",
         "Stateful validation and turn routing"
       ]
     }

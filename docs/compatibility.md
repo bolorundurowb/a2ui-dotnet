@@ -18,16 +18,19 @@ The first turn negotiates capabilities, creates the form and sends separate comp
 | Agent runtime | Capability and catalog negotiation, fixed and negotiated catalogs, policy-gated inline catalogs, pruning, prompts, examples and skills. Validate deterministic and generated messages through Core. Route actions, diagnostics and RPC across turns. | Pending pinned Agent cases and replay. |
 | Direct JSON | Batch compile, decompile and response parsing, plus incremental streaming with ordered text and UI, partial-result diagnostics, cancellation and size limits. | Pending pinned Agent cases and scaling checks. |
 | Express | Batch compile, decompile, wrapping, response parsing and prompt generation with the Basic Catalog golden corpus. | Pending pinned Agent cases and scaling checks. |
+| Express streaming | Incremental parsing and emission, ordered text and UI, and diagnostics for partial or malformed output. | Pending [#33](https://github.com/bolorundurowb/a2ui-dotnet/issues/33) and the pinned Express streaming cases. |
+| Agent macros | Catalog-aware expansion with scoped IDs, nested macros and shared Core validation. | Pending [#34](https://github.com/bolorundurowb/a2ui-dotnet/issues/34) and the pinned v1.0 macro cases. |
+| Trimming and Native AOT | Preserve support in the Core and Agent API design. Verify headless consumers for each claimed deployment target. | Windows x64 scaffold publish and execution passed for trimmed .NET 8 and Native AOT .NET 8 and 10. End-to-end package verification with protocol APIs is pending. |
 
-## Deferred capabilities
+## Optional integrations
 
-| Capability | Decision |
+| Capability | Planned scope |
 | --- | --- |
-| A2UI 0.9.1 and other legacy wire versions | Excluded from the stable profile. Reconsider 0.9.1 with a named consumer and captured payloads in the required directions. |
-| Express streaming | Excluded. Reconsider when pinned upstream grammar, emission semantics and fixtures support a reproducible implementation. |
-| Macros and optional catalog extensions | Excluded. Reconsider with a named consumer and pinned evidence for the relevant behavior. |
-| Renderer framework adapters and additional transports | Excluded from the SDK packages. Evaluate with a named consumer. The SSE sample is a reference host integration. |
-| Trimming and Native AOT | No compatibility claim. Require a clean published consumer to pass for each claimed deployment mode. Revisit Native AOT when a named consumer needs it. |
+| Optional catalog extensions | Verify declared extension catalogs and their host requirements, starting with MCP and VegaChart v1 as candidates. [#35](https://github.com/bolorundurowb/a2ui-dotnet/issues/35) |
+| Renderer framework adapters | Ship separately from the SDKs. Select and verify the first adapter, with Blazor as a candidate. [#36](https://github.com/bolorundurowb/a2ui-dotnet/issues/36) |
+| Additional transports | Ship independently of the SDKs. Select and verify the first binding beyond the ASP.NET Core SSE sample, with A2A and AG-UI as candidates. [#37](https://github.com/bolorundurowb/a2ui-dotnet/issues/37) |
+
+A2UI 0.9.1 and other legacy wire versions remain outside the stable profile. Reconsider 0.9.1 with a named consumer and captured payloads in the required directions.
 
 ## .NET package compatibility
 
