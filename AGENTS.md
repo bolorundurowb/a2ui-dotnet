@@ -10,8 +10,8 @@
 
 ## Protocol and tests
 
-- Use the pinned upstream protocol specification, schemas, and conformance fixtures for interoperability work once the baseline is selected. Record the revision and a minimal fixture when upstream references disagree.
-- Exercise protocol behavior through public entry points. Use the upstream fixtures where available and add focused regressions for behavior the fixtures miss.
+- Implement against the pinned upstream protocol, schemas, and [module blueprints](https://github.com/a2ui-project/a2ui/tree/main/blueprints/modules). Record the revision and a minimal fixture when upstream references disagree.
+- Run the official [Core suite](https://github.com/a2ui-project/a2ui/tree/main/conformance/core) and [Agent suite](https://github.com/a2ui-project/a2ui/tree/main/conformance/agent) through the SDKs' public entry points. Keep both suites pinned to the same upstream revision. Require all applicable cases to pass for release and record the reason for any exclusion. Add focused regressions for behavior the fixtures miss.
 - Run upstream scaling cases and benchmark hot paths before adding optimization complexity. Prefer incremental updates and clear ownership of JSON values and buffers.
 - Validate packaging and publish behavior in a clean consumer. Report the build, test, and publish checks that ran and any outstanding verification.
 - Keep upstream fixture provenance, license headers, and required notices when importing files. The repository's own code uses MIT.
