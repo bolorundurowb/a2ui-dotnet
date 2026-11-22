@@ -1,0 +1,7 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Headless A2UI protocol and state engine for .NET.</Description>
+  </PropertyGroup>
+
+</Project>

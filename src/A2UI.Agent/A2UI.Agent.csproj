@@ -1,0 +1,11 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\A2UI.Core\A2UI.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <Description>Provider-neutral A2UI Agent SDK for .NET.</Description>
+  </PropertyGroup>
+
+</Project>

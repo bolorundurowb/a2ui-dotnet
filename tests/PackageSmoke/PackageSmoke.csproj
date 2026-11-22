@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework Condition="'$(SmokeFramework)' == ''">net8.0</TargetFramework>
+    <TargetFramework Condition="'$(SmokeFramework)' != ''">$(SmokeFramework)</TargetFramework>
+    <RollForward>Disable</RollForward>
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(SmokePackage)' != ''">
+    <PackageReference Include="$(SmokePackage)" Version="[$(SmokeVersion)]" />
+  </ItemGroup>
+</Project>

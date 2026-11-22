@@ -1,0 +1,93 @@
+{
+  "repository": "https://github.com/a2ui-project/a2ui.git",
+  "revision": "d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe",
+  "protocol": "1.0",
+  "license": "Apache-2.0",
+  "checksumFormat": "git-sha1",
+  "peerSdks": [
+    {
+      "package": "a2ui-core",
+      "version": "0.7.0",
+      "tag": "python/a2ui-core/v0.7.0"
+    },
+    {
+      "package": "a2ui-agent-sdk",
+      "version": "0.12.0",
+      "tag": "python/a2ui-agent-sdk/v0.12.0"
+    }
+  ],
+  "assets": [
+    {
+      "path": "LICENSE",
+      "type": "blob",
+      "checksum": "b24d03ff56002c5252a12265de3c958ba96c9162"
+    },
+    {
+      "path": "specification/versions.json",
+      "type": "blob",
+      "checksum": "4dc0ac0d232a9db4b380d18ac234c7dd7b5f523a"
+    },
+    {
+      "path": "specification/v1_0",
+      "type": "tree",
+      "checksum": "a9318ade96234a6018f7ccc7aee650984bbf8201"
+    },
+    {
+      "path": "catalogs/basic/v1",
+      "type": "tree",
+      "checksum": "b1ac6b7474247a9a9a763826be9051975e54023e"
+    },
+    {
+      "path": "blueprints/modules/a2ui_core.blueprint.md",
+      "type": "blob",
+      "checksum": "31d6747170b8a1f12e48d6c35e4927332a1be3ee"
+    },
+    {
+      "path": "blueprints/modules/a2ui_agent.blueprint.md",
+      "type": "blob",
+      "checksum": "679b0a1da4f678f369f06ea611469b5f8e367154"
+    },
+    {
+      "path": "conformance",
+      "type": "tree",
+      "checksum": "578ad4e38d23a6d247d9f1d0624b247d9e91738f"
+    },
+    {
+      "path": "python/a2ui_core/pyproject.toml",
+      "type": "blob",
+      "checksum": "7513ca92d022648f6afb997364c5d051c478fa95"
+    },
+    {
+      "path": "python/a2ui_agent/pyproject.toml",
+      "type": "blob",
+      "checksum": "639677673e2161e3612ee2af9c22ee96eda0cdee"
+    }
+  ],
+  "modules": [
+    {
+      "package": "A2UI.Core",
+      "blueprint": "blueprints/modules/a2ui_core.blueprint.md",
+      "suite": "conformance/core",
+      "areas": [
+        "Wire and metadata",
+        "Catalogs and validation",
+        "Surface graph and lifecycle",
+        "Data model and expressions",
+        "Resolved nodes and actions",
+        "Function RPC"
+      ]
+    },
+    {
+      "package": "A2UI.Agent",
+      "blueprint": "blueprints/modules/a2ui_agent.blueprint.md",
+      "suite": "conformance/agent",
+      "areas": [
+        "Capabilities and catalog negotiation",
+        "Prompts and examples",
+        "Direct JSON batch and streaming",
+        "Express batch",
+        "Stateful validation and turn routing"
+      ]
+    }
+  ]
+}
