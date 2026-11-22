@@ -1,5 +1,7 @@
 # A2UI for .NET
 
+[![Build](https://github.com/bolorundurowb/a2ui-dotnet/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/bolorundurowb/a2ui-dotnet/actions/workflows/build.yml)
+
 A community project for building [A2UI](https://a2ui.org/) (Agent-to-User Interface) agents and processing A2UI messages in .NET. A2UI lets an agent describe interactive interfaces as structured messages. A compatible renderer displays those messages and sends user actions back to the agent.
 
 ## Project status
