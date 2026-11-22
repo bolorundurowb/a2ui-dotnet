@@ -50,7 +50,15 @@ smoke checks and ran in a fresh trimmed .NET 8 Windows x64 package consumer.
 
 Core uses the pinned schema's `@catalogId` on components. The processor fixture
 `test_v10_component_catalog_override` uses `catalogId` and supplies placeholder
-catalogs without component definitions. Derived catalogs can select entries
+catalogs without component definitions. The same spelling occurs in the
+processor fixtures for explicit component routing and updates without an
+override. Core preserves bare `catalogId` for catalog-defined component
+properties. The validator fixture `test_v10_uax31_invalid_identifier_error`
+requires identifier syntax for component IDs, while the pinned
+`common_types.json#/$defs/ComponentId` specifies a string. The conformance
+report records these differences at the pinned revision above.
+
+Derived catalogs can select entries
 from a registered source. The upstream `derive_source_catalog_v1_0.json`
 fixture includes legacy function shapes and a theme field, which the pinned
 1.0 catalog schema rejects. Derivation with replacement entries and golden

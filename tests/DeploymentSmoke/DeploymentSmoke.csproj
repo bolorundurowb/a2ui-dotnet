@@ -15,5 +15,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../PackageSmoke/CoreSmoke.cs" Link="CoreSmoke.cs" />
+    <Compile Include="../PackageSmoke/AgentSmoke.cs" Link="AgentSmoke.cs" />
   </ItemGroup>
 </Project>

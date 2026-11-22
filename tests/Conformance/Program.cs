@@ -49,6 +49,15 @@ foreach (var suite in new[] { "core", "agent" })
                 _ when !scaling && AgentCases.Supports(path, test) => null,
                 (_, _, "conformance/core/catalog.yaml") when id == "test_v10_catalog_from_json_v1_0_attributes" =>
                     "The fixture uses a function entry without type and properties. The pinned catalog schema requires both.",
+                (_, _, "conformance/core/validator_v1_0.yaml") when id == "test_v10_uax31_invalid_identifier_error" =>
+                    "The fixture requires UAX #31 component IDs. The pinned common types schema defines ComponentId as a string.",
+                (_, _, "conformance/core/message_processor_v1_0.yaml") when id is
+                    "test_v10_component_catalog_override" or "test_v10_components_naming_catalogs_on_surface_without_default" or
+                    "test_v10_component_from_named_catalog_with_closed_schema_accepted" or
+                    "test_v10_component_update_without_catalog_id_on_surface_without_default_errors" or
+                    "test_v10_component_update_without_catalog_id_uses_surface_default" or
+                    "test_v10_component_naming_catalog_is_checked_against_that_catalog" =>
+                    "The fixture routes a component using bare catalogId. The pinned protocol uses @catalogId for component routing.",
                 _ when ReadString(test, "action") is "agent_to_renderer_schema" or "common_types_schema" => "Generated schema parity is outside the current profile.",
                 _ => "Public API or fixture adapter is pending."
             };
