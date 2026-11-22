@@ -44,6 +44,15 @@ dotnet run --project tests/SchemaComparison -c Release -- $assets
 See the [schema profile and comparison](docs/schema-validation.md) for the
 measured workload and current limits.
 
+The conformance workflow uploads both case reports and a refreshed badge.
+The badge counts each upstream case once and includes excluded cases in the
+total. When a change affects conformance counts, include the refreshed SVG
+in the same PR. To regenerate it locally from the reports above, run:
+
+```powershell
+./scripts/New-ConformanceBadge.ps1 artifacts/conformance.json artifacts/conformance-scaling.json docs/conformance-badge.svg
+```
+
 ## Trimming and Native AOT
 
 Both SDKs run trim and AOT analysis. Prefer source-generated `System.Text.Json` metadata and explicit registration of catalog and host types. If reflection needs to access members of a caller-supplied type, use `DynamicallyAccessedMembers` with the smallest required member set. Use `RequiresUnreferencedCode` or `RequiresDynamicCode` at an API boundary when an operation cannot satisfy the corresponding deployment mode. Preserve annotations when forwarding types and investigate warnings before using a suppression. [Microsoft trimming guidance](https://learn.microsoft.com/en-us/dotnet/core/deploying/trimming/prepare-libraries-for-trimming)
