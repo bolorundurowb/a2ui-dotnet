@@ -42,6 +42,7 @@
 
 ### Pull requests
 
-- Use the commit subject format for the PR title and follow `.github/PULL_REQUEST_TEMPLATE.md` for the body. Identify the behavior change, why it is needed, the checks that ran, and any material verification gaps. Link a related issue when one exists.
+- Use the commit subject format for the PR title and follow `.github/PULL_REQUEST_TEMPLATE.md` for the body. Identify the behavior change, why it is needed, the checks that ran, and any material verification gaps.
+- Use `Closes #<issue-number>` in the PR body by default for each issue the PR addresses. Evaluate each issue independently against its acceptance criteria, required verification, and any remaining work. If that review shows an issue should stay open, use a plain issue reference and explain what remains. In a PR covering multiple issues, use the closing keyword for every issue that is ready to close.
 - Include the protocol version and upstream fixture for interoperability changes, consumer impact for public API changes, and before-and-after measurements for performance changes.
 - When authorized to open a PR, use a draft while verification or required decisions are pending. Push and open the PR only within the user's authorization. Leave merging and history rewrites to explicit user direction.
