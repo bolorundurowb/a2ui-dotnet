@@ -5,6 +5,8 @@ namespace A2UI.Core;
 internal static class ProtocolSchemas
 {
     private const string BaseUri = "https://a2ui.org/specification/v1_0/";
+    internal static bool IsCommonTypes(string reference) =>
+        reference is "common_types.json" or BaseUri + "common_types.json";
     private static readonly Dictionary<string, JsonElement> Schemas = new(StringComparer.Ordinal)
     {
         ["agent_to_renderer.json"] = Read("agent_to_renderer.json"),

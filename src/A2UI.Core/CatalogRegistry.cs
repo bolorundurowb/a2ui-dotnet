@@ -142,6 +142,22 @@ public sealed class CatalogRegistry
     public A2uiDiagnostic? ValidateFunction(JsonElement function, string? defaultCatalogId) =>
         ValidateItem(function, defaultCatalogId, "functions", "@call", "catalogId");
 
+    internal bool TryGetComponentSchema(JsonElement component, string? defaultCatalogId,
+        out JsonElement document, out JsonElement schema)
+    {
+        schema = default;
+        var id = component.TryGetProperty("@catalogId", out var explicitId) ? explicitId.GetString() : defaultCatalogId;
+        document = default;
+        return id is not null && TryGetDefinition(id, out document) &&
+            document.TryGetProperty("components", out var components) &&
+            components.TryGetProperty(component.GetProperty("component").GetString()!, out schema);
+    }
+
+    internal bool MatchesComponentBranch(JsonElement instance, JsonElement schema, JsonElement document,
+        string? surfaceCatalogId) =>
+        _catalogs[document.GetProperty("catalogId").GetString()!].Validator
+            .Validate(instance, schema, document, surfaceCatalogId) is null;
+
     private void Add(JsonElement definition)
     {
         var id = definition.GetProperty("catalogId").GetString()!;
@@ -191,9 +207,9 @@ public sealed class CatalogRegistry
             string.IsNullOrWhiteSpace(catalogId.GetString()))
             return new("invalidCatalogId", "/catalogId", "Expected a nonempty catalog identifier.");
         var id = catalogId.GetString()!;
-        if (definition.TryGetProperty("$id", out var schemaId) &&
-            (schemaId.ValueKind != JsonValueKind.String || schemaId.GetString() != id))
-            return new("invalidCatalogId", "/$id", "Schema and catalog identity must match.");
+        if (definition.TryGetProperty("$id", out var schemaIdentity) &&
+            (schemaIdentity.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(schemaIdentity.GetString())))
+            return new("invalidCatalogId", "/$id", "Expected a nonempty schema identifier.");
         if (_catalogs.ContainsKey(id))
             return new("duplicateCatalog", "/catalogId", "Catalog is already registered.");
 
@@ -213,10 +229,11 @@ public sealed class CatalogRegistry
         var diagnostic = new SchemaValidator(ProtocolSchemas.Resolve).Validate(definition, meta, meta);
         if (diagnostic is not null)
             return diagnostic;
-        return CheckReferences(definition, definition, id, "");
+        var schemaId = schemaIdentity.ValueKind == JsonValueKind.String ? schemaIdentity.GetString() : null;
+        return CheckReferences(definition, definition, schemaId, "");
     }
 
-    private static A2uiDiagnostic? CheckReferences(JsonElement value, JsonElement document, string id, string path)
+    private static A2uiDiagnostic? CheckReferences(JsonElement value, JsonElement document, string? schemaId, string path)
     {
         if (WireJson.IsObject(value))
         {
@@ -228,14 +245,14 @@ public sealed class CatalogRegistry
                     if (property.Value.ValueKind != JsonValueKind.String)
                         return new("invalidReference", childPath, "Expected a schema reference string.");
                     var parts = property.Value.GetString()!.Split('#', 2);
-                    var target = parts[0] is "" || parts[0] == id ? document :
-                        parts[0] == "common_types.json" ? ProtocolSchemas.Resolve(parts[0]) : null;
+                    var target = parts[0] is "" || parts[0] == schemaId ? document :
+                        ProtocolSchemas.IsCommonTypes(parts[0]) ? ProtocolSchemas.Resolve(parts[0]) : null;
                     if (target is null || !SchemaValidator.TryResolvePointer(target.Value, parts.Length == 2 ? parts[1] : "", out var resolved)
                         || resolved.ValueKind is not (JsonValueKind.Object or JsonValueKind.True or JsonValueKind.False))
                         return new("unresolvedReference", childPath, "Reference must point to a registered schema.");
                 }
                 else if (property.Name is not ("default" or "examples" or "const" or "enum" or "metadata") &&
-                    CheckReferences(property.Value, document, id, childPath) is { } failure)
+                    CheckReferences(property.Value, document, schemaId, childPath) is { } failure)
                     return failure;
             }
         }
@@ -243,7 +260,7 @@ public sealed class CatalogRegistry
         {
             var index = 0;
             foreach (var child in value.EnumerateArray())
-                if (CheckReferences(child, document, id, WireJson.Path(path, (index++).ToString(System.Globalization.CultureInfo.InvariantCulture))) is { } failure)
+                if (CheckReferences(child, document, schemaId, WireJson.Path(path, (index++).ToString(System.Globalization.CultureInfo.InvariantCulture))) is { } failure)
                     return failure;
         }
         return null;

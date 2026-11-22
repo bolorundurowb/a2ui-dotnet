@@ -12,7 +12,7 @@ The first turn negotiates capabilities, creates the form and sends separate comp
 
 | Area | Release target | Verification |
 | --- | --- | --- |
-| Core wire and state | A2UI 1.0 in both directions, including versioned metadata, ordered surface lifecycle, strict and progressive graph validation, JSON Pointer updates and reactive bindings, expressions and scopes. | Selected A2UI 1.0 lifecycle, catalog and wire cases pass. Graph policies, nested JSON Pointer writes, reactive behavior and cross-language replay are pending. |
+| Core wire and state | A2UI 1.0 in both directions, including versioned metadata, ordered surface lifecycle, strict and progressive graph validation, JSON Pointer updates and reactive bindings, expressions and scopes. | Selected A2UI 1.0 wire, lifecycle and topology cases and all pinned 1.0 pointer and deletion cases pass. Reactive bindings, expressions, scopes and cross-language replay are pending. |
 | Core catalogs and interaction | Basic Catalog components and portable functions, offline registered custom and mixed catalogs, resolved accessibility attributes, actions, diagnostics and owner-scoped data sync. Host-bound functions use explicit registration. | Basic Catalog serialization and mixed-catalog validation smoke checks pass. Portable function execution, actions, data sync and replay are pending. |
 | RPC | Agent → renderer calls and renderer → agent calls, each with replies in the opposite direction. Validate caller, activation and arguments. Cover correlation, errors, cancellation and reactive sharing. | Pending pinned Core and Agent cases and replay. |
 | Agent runtime | Capability and catalog negotiation, fixed and negotiated catalogs, policy-gated inline catalogs, pruning, prompts, examples and skills. Validate deterministic and generated messages through Core. Route actions, diagnostics and RPC across turns. | Pending pinned Agent cases and replay. |
@@ -21,6 +21,14 @@ The first turn negotiates capabilities, creates the form and sends separate comp
 | Express streaming | Incremental parsing and emission, ordered text and UI, and diagnostics for partial or malformed output. | Pending [#33](https://github.com/bolorundurowb/a2ui-dotnet/issues/33) and the pinned Express streaming cases. |
 | Agent macros | Catalog-aware expansion with scoped IDs, nested macros and shared Core validation. | Pending [#34](https://github.com/bolorundurowb/a2ui-dotnet/issues/34) and the pinned v1.0 macro cases. |
 | Trimming and Native AOT | Preserve support in the Core and Agent API design. Verify headless consumers for each claimed deployment target. | Windows x64 scaffold publish and execution passed for trimmed .NET 8 and Native AOT .NET 8 and 10. A trimmed .NET 8 Core package consumer and a .NET 8 Native AOT smoke application passed with the wire, catalog and surface APIs. Broader deployment verification is pending. |
+
+## Core state behavior
+
+`SurfaceSession` defaults to progressive topology validation for streamed updates. It accepts temporarily missing roots, forward references and orphans. Use `GraphValidationOptions.Strict` to require a complete reachable graph after each nonempty component batch. Both modes enforce composition, cycles and a 50-edge nesting limit before committing. A rejected operation preserves the previous snapshot and emits no change event.
+
+Hosts serialize calls into each session. Local `WriteData` calls and remote `updateDataModel` messages commit in call order, with the last successful write taking effect. Reads use immutable snapshots. A missing pointer returns false, and a stored JSON null returns true with a null value. A null write deletes an object member, leaves a null slot in an array, or resets the root to an empty object. Change events carry the committed snapshot and the write's pointer so consumers can refresh bindings that overlap it. Reentrant writes are rejected.
+
+The Release correctness run passed 66 pinned Core cases on .NET 8.0.34 for Windows x64. In the same environment, the two progressive graph scaling workloads exceeded the upstream 8× growth limit. The Basic Catalog workload took 21.1 ms at 200 updates and 308.4 ms at 800, a 14.61× increase. The composition workload took 471.2 ms at 1,000 updates and 14,512 ms at 4,000, a 30.80× increase. The processor rebuilds and validates the candidate graph per component batch. [Performance tracking](https://github.com/bolorundurowb/a2ui-dotnet/issues/26)
 
 ## Optional integrations
 

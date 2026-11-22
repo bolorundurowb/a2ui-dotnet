@@ -30,8 +30,9 @@ The smoke script packs both SDKs into a fresh local feed, restores each package 
 
 Run the correctness and scaling inventory separately. The JSON reports include
 the upstream revision, case IDs, protocol versions when supplied by the suite,
-and a status and reason for each case. Scaling cases require their own fixture
-adapters. Cases with unavailable SDK behavior have explicit exclusions.
+and a status and reason for each case. The scaling run times the two pinned Core
+progressive processor workloads through the UTF-8 codec and session. Run it
+on an otherwise idle machine. Cases with unavailable SDK behavior have explicit exclusions.
 
 ```powershell
 $assets = ./scripts/Get-UpstreamBaseline.ps1
