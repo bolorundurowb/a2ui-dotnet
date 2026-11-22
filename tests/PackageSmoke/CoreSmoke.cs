@@ -160,11 +160,14 @@ internal static class CoreSmoke
         var changes = new List<string?>();
         session.Changed += change => changes.Add(change.DataPath);
         using (var edit = JsonDocument.Parse("""{"local":true,"value":null}"""))
-            Require(session.WriteData("form", "/edit", edit.RootElement) is null);
+            Require(session.WriteScopedData("form", "/", "edit", edit.RootElement) is null);
 
         Require(session.TryGetSurface("form", out var edited) &&
-            edited!.TryGetData("/edit/value", out var value) && value.ValueKind == JsonValueKind.Null);
-        Require(!edited!.TryGetData("/edit/missing", out _));
+            edited!.TryGetScopedData("/edit", "value", out var value) && value.ValueKind == JsonValueKind.Null);
+        Require(!edited!.TryGetScopedData("/edit", "missing", out _));
+        Require(edited.TryGetScopedData("/edit", "", out var scope) && scope.GetProperty("local").GetBoolean());
+        Require(edited.TryGetScopedData("/edit", "/name", out var name) && name.GetString() == "Ada");
+        Require(!edited.TryGetScopedData("/edit", "~2", out _));
         Require(session.Apply(Decode("""
             {"version":"1.0","updateDataModel":{"surfaceId":"form","path":"/edit/local","value":false}}
             """)) is null);
