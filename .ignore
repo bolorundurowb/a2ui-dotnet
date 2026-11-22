@@ -1,0 +1,18 @@
+# Generated build, test, and benchmark directories
+[Bb]in/
+[Oo]bj/
+[Aa]rtifacts/
+[Tt]est[Rr]esults/
+BenchmarkDotNet.Artifacts/
+[Cc]overage/
+node_modules/
+
+# Dependency lockfiles
+packages.lock.json
+paket.lock
+package-lock.json
+npm-shrinkwrap.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+bun.lockb
