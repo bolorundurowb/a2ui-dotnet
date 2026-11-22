@@ -7,7 +7,7 @@ internal static class CoreCases
 {
     internal static bool Supports(string file, string id) => (file, id) switch
     {
-        ("conformance/core/expressions.yaml", _) when id.StartsWith("test_expr_", StringComparison.Ordinal) => true,
+        ("conformance/core/expressions.yaml", _) when id != "test_expression_parser_nested_function_call" => true,
         ("conformance/core/data_model_pointers.yaml" or "conformance/core/data_deletion.yaml", _) => true,
         ("conformance/core/validator_v1_0.yaml", _) when id.StartsWith("test_v10_topology_", StringComparison.Ordinal) ||
             id.StartsWith("test_v10_component_nesting_depth_", StringComparison.Ordinal) ||
@@ -39,6 +39,11 @@ internal static class CoreCases
         switch (file)
         {
             case "conformance/core/expressions.yaml":
+                if (test.GetProperty("action").ValueEquals("validate"))
+                {
+                    RunSurfaceExpression(test);
+                    break;
+                }
                 var parsed = ExpressionTemplate.TryParse(test.GetProperty("input").GetString()!, out var parts, out var parseError);
                 if (test.TryGetProperty("expect_error", out var expectedError))
                 {
@@ -69,6 +74,42 @@ internal static class CoreCases
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(file));
+        }
+    }
+
+    private static void RunSurfaceExpression(JsonElement test)
+    {
+        var registry = new CatalogRegistry();
+        Require(registry.TryGetDefinition(CatalogRegistry.BasicCatalogId, out var basic), "Basic Catalog is unavailable.");
+        var alias = JsonNode.Parse(basic.GetRawText())!.AsObject();
+        alias["catalogId"] = "basic";
+        alias["$id"] = "basic";
+        Require(registry.TryRegister(Encoding.UTF8.GetBytes(alias.ToJsonString()), out var registrationError),
+            registrationError?.ToString() ?? "Basic Catalog alias is unavailable.");
+        using var session = new SurfaceSession(registry);
+        foreach (var step in test.GetProperty("steps").EnumerateArray())
+        {
+            foreach (var item in step.GetProperty("payload").EnumerateArray())
+            {
+                Require(WireMessage.TryDecode(Encoding.UTF8.GetBytes(item.GetRawText()), WireDirection.AgentToRenderer,
+                    out var message, out var decodeError), decodeError?.ToString() ?? "Invalid expression fixture message.");
+                var applyError = session.Apply(message!);
+                Require(applyError is null, applyError?.ToString() ?? "Failed to apply expression fixture message.");
+            }
+            Require(session.TryGetSurface("main", out var surface) && surface is not null, "Missing expression surface.");
+            var definition = surface!.Components["root"].GetProperty("text");
+            var template = definition.GetProperty("args").GetProperty("value").GetString()!;
+            var evaluated = ExpressionTemplate.TryEvaluate(template, surface.DataModel, default, surface.CatalogId,
+                invoke: null, out var text, out var diagnostic);
+            if (step.TryGetProperty("expectError", out var error))
+                Require(!evaluated && diagnostic?.Message.Contains(error.GetProperty("message").GetString()!,
+                    StringComparison.Ordinal) == true, diagnostic?.ToString() ?? "Expected evaluation failure.");
+            else
+            {
+                var expected = test.GetProperty("expect").GetProperty("surfaces").GetProperty("main")
+                    .GetProperty("components").GetProperty("root").GetProperty("text").GetString();
+                Require(evaluated && text == expected, diagnostic?.ToString() ?? "Interpolated text differs.");
+            }
         }
     }
 

@@ -46,6 +46,8 @@ foreach (var suite in new[] { "core", "agent" })
                 (_, _, "conformance/core/message_processor_scaling.yaml") when id == "test_scaling_process_single_component_messages_v10" =>
                     "SurfaceSession requires topology validation and has no unchecked processing mode.",
                 _ when !scaling && CoreCases.Supports(path, id) => null,
+                (_, _, "conformance/core/expressions.yaml") when id == "test_expression_parser_nested_function_call" =>
+                    "The case requires the Basic Catalog formatCurrency implementation.",
                 _ when !scaling && AgentCases.Supports(path, test) => null,
                 (_, _, "conformance/core/catalog.yaml") when id == "test_v10_catalog_from_json_v1_0_attributes" =>
                     "The fixture uses a function entry without type and properties. The pinned catalog schema requires both.",

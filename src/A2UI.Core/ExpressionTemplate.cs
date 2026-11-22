@@ -9,6 +9,56 @@ namespace A2UI.Core;
 /// <summary>Parses the interpolation syntax used by A2UI formatString.</summary>
 public static class ExpressionTemplate
 {
+    /// <summary>Evaluates a template against a root data model and an optional collection scope.</summary>
+    /// <param name="template">The template to evaluate.</param>
+    /// <param name="dataModel">The root data model.</param>
+    /// <param name="scope">The current collection item, or an undefined value for the root scope.</param>
+    /// <param name="catalogId">The catalog selected for the enclosing formatString call.</param>
+    /// <param name="invoke">An optional host resolver for function calls, receiving the catalog ID, function name, and resolved arguments. System calls receive a null catalog ID.</param>
+    /// <param name="result">The interpolated string on success.</param>
+    /// <param name="diagnostic">The reason evaluation failed, if any.</param>
+    /// <returns>Whether the template was evaluated. Missing paths interpolate as empty strings.</returns>
+    public static bool TryEvaluate(string template, JsonElement dataModel, JsonElement scope, string? catalogId,
+        Func<string?, string, IReadOnlyDictionary<string, JsonElement>, JsonElement>? invoke,
+        out string? result, out A2uiDiagnostic? diagnostic)
+    {
+        result = null;
+        if (!TryParse(template, out var parts, out diagnostic))
+            return false;
+
+        var evaluator = new Evaluator(dataModel, scope.ValueKind == JsonValueKind.Undefined ? dataModel : scope, catalogId, invoke);
+        var text = new StringBuilder();
+        foreach (var part in parts.EnumerateArray())
+        {
+            if (!evaluator.TryResolve(part, out var value, out diagnostic))
+                return false;
+            var display = value.ValueKind switch
+            {
+                JsonValueKind.Undefined or JsonValueKind.Null => "",
+                JsonValueKind.String => value.GetString()!,
+                JsonValueKind.Object or JsonValueKind.Array => CompactJson(value),
+                _ => value.GetRawText()
+            };
+            if (display.Length > 1_048_576 - text.Length)
+            {
+                diagnostic = new("ExpressionError", "", "Interpolated result exceeds the length limit.");
+                return false;
+            }
+            text.Append(display);
+        }
+
+        result = text.ToString();
+        return true;
+    }
+
+    private static string CompactJson(JsonElement value)
+    {
+        var bytes = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(bytes))
+            value.WriteTo(writer);
+        return Encoding.UTF8.GetString(bytes.WrittenSpan);
+    }
+
     /// <summary>Parses a template into literals, path bindings, and function calls.</summary>
     /// <param name="template">The template to parse, limited to 65,536 UTF-16 code units.</param>
     /// <param name="parts">The owned JSON array of parsed parts.</param>
@@ -32,6 +82,47 @@ public static class ExpressionTemplate
             parts = default;
             diagnostic = new A2uiDiagnostic("ParseError", "", error.Message);
             return false;
+        }
+    }
+
+    private sealed class Evaluator(JsonElement root, JsonElement scope, string? catalogId,
+        Func<string?, string, IReadOnlyDictionary<string, JsonElement>, JsonElement>? invoke)
+    {
+        internal bool TryResolve(JsonElement part, out JsonElement value, out A2uiDiagnostic? diagnostic)
+        {
+            diagnostic = null;
+            value = part;
+            if (part.ValueKind != JsonValueKind.Object)
+                return true;
+            if (part.TryGetProperty("path", out var pointer))
+            {
+                var path = pointer.GetString()!;
+                var absolute = path.StartsWith('/');
+                value = default;
+                if (!DataPointer.TryParse(absolute ? path : "/" + path, out var segments))
+                {
+                    diagnostic = new("ExpressionError", "", "Invalid path syntax or depth.");
+                    return false;
+                }
+                DataPointer.TryGet(absolute ? root : scope, segments, out value);
+                return true;
+            }
+
+            var name = part.GetProperty("call").GetString()!;
+            if (invoke is null)
+            {
+                diagnostic = new("ExpressionError", "", "No function resolver is available.");
+                return false;
+            }
+            var arguments = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            foreach (var argument in part.GetProperty("args").EnumerateObject())
+            {
+                if (!TryResolve(argument.Value, out var resolved, out diagnostic))
+                    return false;
+                arguments.Add(argument.Name, resolved);
+            }
+            value = invoke(name.StartsWith('@') ? null : catalogId, name, arguments);
+            return true;
         }
     }
 
@@ -99,10 +190,17 @@ public static class ExpressionTemplate
             if (char.IsAsciiDigit(At(unsigned)) || (At(unsigned) == '.' && char.IsAsciiDigit(At(unsigned + 1))))
                 return ReadNumber();
 
+            var systemCall = Take("@");
             var name = ReadToken(allowPath: true);
             if (name.Length == 0)
                 throw new FormatException("Unexpected characters in expression.");
             SkipWhitespace();
+            if (systemCall)
+            {
+                if (!Take("("))
+                    throw new FormatException("Expected a system function call.");
+                return ReadCall(name, depth, systemCall: true);
+            }
             return name switch
             {
                 "null" => JsonValue.Create("")!,
@@ -113,7 +211,7 @@ public static class ExpressionTemplate
             };
         }
 
-        private JsonObject ReadCall(string name, int depth)
+        private JsonObject ReadCall(string name, int depth, bool systemCall = false)
         {
             if (name.EnumerateRunes().Any(rune => !UnicodeIdentifiers.IsContinue(rune)))
                 throw new FormatException("Invalid function name.");
@@ -135,7 +233,7 @@ public static class ExpressionTemplate
                 }
                 SkipWhitespace();
             }
-            return new JsonObject { ["call"] = name, ["args"] = args, ["returnType"] = "any" };
+            return new JsonObject { ["call"] = systemCall ? "@" + name : name, ["args"] = args, ["returnType"] = "any" };
         }
 
         private string ReadToken(bool allowPath)

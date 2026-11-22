@@ -66,6 +66,7 @@ internal static class CoreSmoke
         Require(session.Apply(delete) is null && notifications == 3);
         Require(session.Apply(create) is null && notifications == 4);
         CheckDataWrites(session);
+        CheckExpressionScope();
 
         Decode("""{"version":"1.0","callRendererFunction":{"functionCallId":"c","callFunction":{"@call":"now","catalogId":"test:cards"}}}""");
         Decode("""{"version":"1.0","agentFunctionResponse":{"functionCallId":"c","value":null}}""");
@@ -94,6 +95,34 @@ internal static class CoreSmoke
         Require(WireMessage.TryDecode(output.WrittenMemory, WireDirection.AgentToRenderer, out var copy, out var roundTrip) &&
             copy!.Envelope.GetProperty("createSurface").GetProperty("dataModel").GetProperty("number").GetRawText() ==
             "9007199254740993", roundTrip);
+    }
+
+    private static void CheckExpressionScope()
+    {
+        using var data = JsonDocument.Parse("""{"label":"root","items":[{"label":"item"}]}""");
+        var root = data.RootElement;
+        var scope = root.GetProperty("items")[0];
+        var calls = new List<(string? Catalog, string Name)>();
+        var success = ExpressionTemplate.TryEvaluate(
+            "${label}:${outer(value: inner(value: /label), index: @index())}:${missing}",
+            root, scope, "test:formatting", Invoke, out var result, out var error);
+        Require(success && result == "item:root:", error);
+        Require(calls.SequenceEqual(new (string?, string)[]
+        {
+            ("test:formatting", "inner"),
+            (null, "@index"),
+            ("test:formatting", "outer")
+        }));
+
+        JsonElement Invoke(string? catalog, string name, IReadOnlyDictionary<string, JsonElement> arguments)
+        {
+            calls.Add((catalog, name));
+            if (name == "@index")
+                return scope;
+            if (name == "outer")
+                Require(arguments["index"].GetProperty("label").ValueEquals("item"));
+            return arguments["value"];
+        }
     }
 
     private static void CheckDataWrites(SurfaceSession session)
