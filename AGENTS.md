@@ -18,6 +18,7 @@
 
 ## Working in this repository
 
+- Document every public SDK API with XML documentation, including public types, members, enum values and parameters where applicable.
 - Follow `.editorconfig` and keep changes focused. Add build and test commands to `CONTRIBUTING.md` as the corresponding projects become available.
 - Use `.ignore` for routine repository searches and file discovery. `rg` reads it automatically. Inspect a build artifact or lockfile directly when the task requires it.
 - Keep generated build output, local settings, and signing material outside source control. Commit sample configuration with placeholder values only.
