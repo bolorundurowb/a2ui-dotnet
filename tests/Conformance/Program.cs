@@ -46,6 +46,7 @@ foreach (var suite in new[] { "core", "agent" })
                 (_, _, "conformance/core/message_processor_scaling.yaml") when id == "test_scaling_process_single_component_messages_v10" =>
                     "SurfaceSession requires topology validation and has no unchecked processing mode.",
                 _ when !scaling && CoreCases.Supports(path, id) => null,
+                _ when !scaling && AgentCases.Supports(path, test) => null,
                 (_, _, "conformance/core/catalog.yaml") when id == "test_v10_catalog_from_json_v1_0_attributes" =>
                     "The fixture uses a function entry without type and properties. The pinned catalog schema requires both.",
                 _ when ReadString(test, "action") is "agent_to_renderer_schema" or "common_types_schema" => "Generated schema parity is outside the current profile.",
@@ -59,6 +60,8 @@ foreach (var suite in new[] { "core", "agent" })
                 {
                     if (runScaling)
                         Console.WriteLine($"{id} {CoreScaling.Run(test, assets)}");
+                    else if (suite == "agent")
+                        AgentCases.Run(test, assets);
                     else
                         CoreCases.Run(path, test, assets);
                     results.Add(new(suite, path, id, version, "pass", null));
