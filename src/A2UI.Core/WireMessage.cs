@@ -88,6 +88,9 @@ public sealed class WireMessage
         diagnostic = ProtocolSchemas.ValidateMessage(envelope, kind, direction);
         if (diagnostic is not null)
             return false;
+        if (kind == "updateDataModel" && envelope.GetProperty(kind).TryGetProperty("path", out var path) &&
+            !DataPointer.TryParse(path.GetString()!, out _))
+            return Reject("invalidPath", "/updateDataModel/path", "Invalid path syntax or depth.", out diagnostic);
         message = new(direction, kind, envelope);
         return true;
     }

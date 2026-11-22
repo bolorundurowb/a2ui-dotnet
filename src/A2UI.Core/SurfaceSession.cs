@@ -19,6 +19,16 @@ public sealed record SurfaceSnapshot(
     /// <summary>The ID reserved for the root component.</summary>
     public string RootComponentId => "root";
 
+    /// <summary>Resolves an absolute data pointer in this snapshot.</summary>
+    /// <param name="path">The pointer, or "/" for the root.</param>
+    /// <param name="value">The resolved JSON value, including explicit null.</param>
+    /// <returns>Whether the path resolves.</returns>
+    public bool TryGetData(string path, out JsonElement value)
+    {
+        value = default;
+        return DataPointer.TryParse(path, out var segments) && DataPointer.TryGet(DataModel, segments, out value);
+    }
+
     private static readonly JsonElement SurfaceContainer = ProtocolSchemas.Parse("""{"component":"Surface","child":"root"}""");
 }
 
@@ -26,16 +36,34 @@ public sealed record SurfaceSnapshot(
 /// <param name="Kind">The operation that committed.</param>
 /// <param name="SurfaceId">The affected surface identifier.</param>
 /// <param name="Snapshot">The committed snapshot, or null after deletion.</param>
-public sealed record SurfaceChange(string Kind, string SurfaceId, SurfaceSnapshot? Snapshot);
+public sealed record SurfaceChange(string Kind, string SurfaceId, SurfaceSnapshot? Snapshot)
+{
+    /// <summary>The changed data pointer for a data write, or null for other operations.</summary>
+    public string? DataPath { get; init; }
+}
 
 /// <summary>Owns one renderer session. Callers serialize access and supply one registry per configuration.</summary>
-/// <param name="catalogs">The registry used for component and function validation.</param>
-public sealed class SurfaceSession(CatalogRegistry catalogs) : IDisposable
+public sealed class SurfaceSession : IDisposable
 {
     private static readonly JsonElement EmptyDataModel = ProtocolSchemas.Parse("{}");
     private readonly Dictionary<string, SurfaceSnapshot> _surfaces = new(StringComparer.Ordinal);
     private bool _notifying;
     private bool _disposed;
+    private readonly CatalogRegistry _catalogs;
+    private readonly GraphValidationOptions _graphValidation;
+
+    /// <summary>Creates a session that accepts progressively delivered component trees.</summary>
+    /// <param name="catalogs">The registry used for component and function validation.</param>
+    public SurfaceSession(CatalogRegistry catalogs) : this(catalogs, GraphValidationOptions.Progressive) { }
+
+    /// <summary>Creates a session with explicit topology validation rules.</summary>
+    /// <param name="catalogs">The registry used for component and function validation.</param>
+    /// <param name="graphValidation">The permitted forms of incomplete component trees.</param>
+    public SurfaceSession(CatalogRegistry catalogs, GraphValidationOptions graphValidation)
+    {
+        _catalogs = catalogs ?? throw new ArgumentNullException(nameof(catalogs));
+        _graphValidation = graphValidation ?? throw new ArgumentNullException(nameof(graphValidation));
+    }
 
     /// <summary>Runs synchronously after commit. Subscribers can read the committed state.</summary>
     public event Action<SurfaceChange>? Changed;
@@ -48,6 +76,28 @@ public sealed class SurfaceSession(CatalogRegistry catalogs) : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         return _surfaces.TryGetValue(id, out snapshot);
+    }
+
+    /// <summary>Applies a local data write using the same ordering and pointer semantics as a remote update.</summary>
+    /// <param name="surfaceId">The identifier of the live surface.</param>
+    /// <param name="path">The absolute pointer. Use "/" for the root.</param>
+    /// <param name="value">The replacement JSON value. Null deletes the target.</param>
+    /// <param name="cancellationToken">Cancels processing before commit.</param>
+    /// <returns>The rejection diagnostic, or null on success.</returns>
+    public A2uiDiagnostic? WriteData(string surfaceId, string path, JsonElement value,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_notifying)
+            return new("reentrantUpdate", "", "Complete the current notification before updating the session.");
+        if (!_surfaces.TryGetValue(surfaceId, out var snapshot))
+            return new("unknownSurface", "/surfaceId", "No live surface uses this ID.");
+        if (value.ValueKind == JsonValueKind.Undefined)
+            return new("invalidDataValue", "/value", "Expected a JSON value.");
+        if (!WireJson.TryRead(System.Text.Encoding.UTF8.GetBytes(value.GetRawText()), out var owned, out var error))
+            return error! with { Path = "/value" + error.Path };
+        return UpdateData(snapshot, path, owned, "/path", cancellationToken);
     }
 
     /// <summary>Applies a surface operation and raises <see cref="Changed"/> after a successful commit.</summary>
@@ -80,7 +130,7 @@ public sealed class SurfaceSession(CatalogRegistry catalogs) : IDisposable
         if (creating)
         {
             var catalogId = payload.TryGetProperty("catalogId", out var catalog) ? catalog.GetString() : null;
-            if (catalogId is not null && !catalogs.TryGetDefinition(catalogId, out _))
+            if (catalogId is not null && !_catalogs.TryGetDefinition(catalogId, out _))
                 return new("unknownCatalog", kindPath + "/catalogId", "Surface catalog is unavailable.");
             var send = payload.TryGetProperty("sendDataModel", out var sendFlag) && sendFlag.GetBoolean();
             var data = payload.TryGetProperty("dataModel", out var inlineData) ? inlineData : EmptyDataModel;
@@ -91,28 +141,29 @@ public sealed class SurfaceSession(CatalogRegistry catalogs) : IDisposable
         if (payload.TryGetProperty("components", out var updates))
         {
             var components = new Dictionary<string, JsonElement>(snapshot!.Components, StringComparer.Ordinal);
-            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var updatePaths = new Dictionary<string, string>(StringComparer.Ordinal);
             var index = 0;
             foreach (var component in updates.EnumerateArray())
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var componentPath = kindPath + "/components/" + index++.ToString(CultureInfo.InvariantCulture);
                 var componentId = component.GetProperty("id").GetString()!;
-                if (!seen.Add(componentId))
+                if (!updatePaths.TryAdd(componentId, componentPath))
                     return new("duplicateComponent", componentPath + "/id", "Component ID is repeated in the update.");
-                if (catalogs.ValidateComponent(component, snapshot.CatalogId) is { } problem)
+                if (_catalogs.ValidateComponent(component, snapshot.CatalogId) is { } problem)
                     return problem with { Path = componentPath + problem.Path };
                 components[componentId] = component;
             }
             snapshot = snapshot with { Components = new ReadOnlyDictionary<string, JsonElement>(components) };
+            if (ComponentGraph.Validate(snapshot, _catalogs, _graphValidation, kindPath + "/components",
+                    updatePaths, cancellationToken) is { } graphError)
+                return graphError;
         }
 
         if (message.Kind == "updateDataModel")
         {
-            if (payload.TryGetProperty("path", out var path) && path.GetString() != "/")
-                return new("unsupportedPath", kindPath + "/path", "Only root updates are supported.");
-            var value = payload.GetProperty("value");
-            snapshot = snapshot! with { DataModel = value.ValueKind == JsonValueKind.Null ? EmptyDataModel : value };
+            var path = payload.TryGetProperty("path", out var pointer) ? pointer.GetString()! : "/";
+            return UpdateData(snapshot!, path, payload.GetProperty("value"), kindPath + "/path", cancellationToken);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -126,16 +177,35 @@ public sealed class SurfaceSession(CatalogRegistry catalogs) : IDisposable
             _surfaces[id] = snapshot!;
         }
 
+        Notify(new(message.Kind, id, snapshot));
+        return null;
+    }
+
+    private A2uiDiagnostic? UpdateData(SurfaceSnapshot snapshot, string path, JsonElement value,
+        string diagnosticPath, CancellationToken cancellationToken)
+    {
+        if (!DataPointer.TryParse(path, out var segments) ||
+            !DataPointer.TryUpdate(snapshot.DataModel, segments, value, out var result))
+            return new("invalidDataPath", diagnosticPath, "The data model cannot be updated at this pointer.");
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var updated = snapshot with { DataModel = result };
+        _surfaces[snapshot.Id] = updated;
+        Notify(new("updateDataModel", snapshot.Id, updated) { DataPath = path });
+        return null;
+    }
+
+    private void Notify(SurfaceChange change)
+    {
         _notifying = true;
         try
         {
-            Changed?.Invoke(new(message.Kind, id, snapshot));
+            Changed?.Invoke(change);
         }
         finally
         {
             _notifying = false;
         }
-        return null;
     }
 
     /// <summary>Releases live surface state and event subscribers.</summary>

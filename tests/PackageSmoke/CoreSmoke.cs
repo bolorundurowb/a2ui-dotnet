@@ -65,6 +65,7 @@ internal static class CoreSmoke
         Require(session.Apply(delete) is null && !session.TryGetSurface("form", out _));
         Require(session.Apply(delete) is null && notifications == 3);
         Require(session.Apply(create) is null && notifications == 4);
+        CheckDataWrites(session);
 
         Decode("""{"version":"1.0","callRendererFunction":{"functionCallId":"c","callFunction":{"@call":"now","catalogId":"test:cards"}}}""");
         Decode("""{"version":"1.0","agentFunctionResponse":{"functionCallId":"c","value":null}}""");
@@ -93,6 +94,29 @@ internal static class CoreSmoke
         Require(WireMessage.TryDecode(output.WrittenMemory, WireDirection.AgentToRenderer, out var copy, out var roundTrip) &&
             copy!.Envelope.GetProperty("createSurface").GetProperty("dataModel").GetProperty("number").GetRawText() ==
             "9007199254740993", roundTrip);
+    }
+
+    private static void CheckDataWrites(SurfaceSession session)
+    {
+        var changes = new List<string?>();
+        session.Changed += change => changes.Add(change.DataPath);
+        using (var edit = JsonDocument.Parse("""{"local":true,"value":null}"""))
+            Require(session.WriteData("form", "/edit", edit.RootElement) is null);
+
+        Require(session.TryGetSurface("form", out var edited) &&
+            edited!.TryGetData("/edit/value", out var value) && value.ValueKind == JsonValueKind.Null);
+        Require(!edited!.TryGetData("/edit/missing", out _));
+        Require(session.Apply(Decode("""
+            {"version":"1.0","updateDataModel":{"surfaceId":"form","path":"/edit/local","value":false}}
+            """)) is null);
+        Require(session.TryGetSurface("form", out var current) &&
+            current!.TryGetData("/edit/local", out var currentValue) && !currentValue.GetBoolean());
+        Require(edited.TryGetData("/edit/local", out var priorValue) && priorValue.GetBoolean());
+        Require(changes.SequenceEqual(new[] { "/edit", "/edit/local" }));
+        Require(!WireMessage.TryDecode("""
+            {"version":"1.0","updateDataModel":{"surfaceId":"form","path":"/edit/~2","value":0}}
+            """u8.ToArray(), WireDirection.AgentToRenderer, out _, out var error) &&
+            error?.Path == "/updateDataModel/path", error);
     }
 
     private static WireMessage Decode(string json, WireDirection direction = WireDirection.AgentToRenderer)

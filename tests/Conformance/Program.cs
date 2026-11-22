@@ -34,13 +34,20 @@ foreach (var suite in new[] { "core", "agent" })
                 ?? throw new InvalidDataException($"Unnamed scenario in {path}.");
             var version = ReadString(test, "protocolVersion") ?? ReadString(test, "version")
                 ?? ReadString(document, "protocolVersion") ?? ReadString(document, "version");
+            var runScaling = scaling && path == "conformance/core/message_processor_scaling.yaml" &&
+                id is "test_scaling_process_single_component_messages_relaxed_v10" or "test_scaling_process_single_component_messages_composition_v10";
             string? reason = (isScaling != scaling, version, path) switch
             {
                 (true, _, _) => "Run mode excludes this case.",
                 (_, "v0.8" or "v0.9" or "v0.9.1" or "0.8" or "0.9" or "0.9.1", _) => "Legacy protocol is outside the profile.",
                 (_, _, _) when path.StartsWith("conformance/agent/legacy/", StringComparison.Ordinal) => "Legacy protocol is outside the profile.",
                 (_, _, "conformance/core/adapter_conformance.yaml") => "Renderer adapter is outside the headless profile.",
+                _ when runScaling => null,
+                (_, _, "conformance/core/message_processor_scaling.yaml") when id == "test_scaling_process_single_component_messages_v10" =>
+                    "SurfaceSession requires topology validation and has no unchecked processing mode.",
                 _ when !scaling && CoreCases.Supports(path, id) => null,
+                (_, _, "conformance/core/catalog.yaml") when id == "test_v10_catalog_from_json_v1_0_attributes" =>
+                    "The fixture uses a function entry without type and properties. The pinned catalog schema requires both.",
                 _ when ReadString(test, "action") is "agent_to_renderer_schema" or "common_types_schema" => "Generated schema parity is outside the current profile.",
                 _ => "Public API or fixture adapter is pending."
             };
@@ -50,7 +57,10 @@ foreach (var suite in new[] { "core", "agent" })
             {
                 try
                 {
-                    CoreCases.Run(path, test, assets);
+                    if (runScaling)
+                        Console.WriteLine($"{id} {CoreScaling.Run(test, assets)}");
+                    else
+                        CoreCases.Run(path, test, assets);
                     results.Add(new(suite, path, id, version, "pass", null));
                 }
                 catch (Exception failure)
