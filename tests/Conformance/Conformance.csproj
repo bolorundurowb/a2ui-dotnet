@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/A2UI.Core/A2UI.Core.csproj" />
+    <ProjectReference Include="../../src/A2UI.Agent/A2UI.Agent.csproj" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 </Project>
