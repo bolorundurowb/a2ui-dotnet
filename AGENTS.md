@@ -18,6 +18,7 @@
 
 ## Working in this repository
 
+- Document every public SDK API with XML documentation, including public types, members, enum values and parameters where applicable.
 - Follow `.editorconfig` and keep changes focused. Add build and test commands to `CONTRIBUTING.md` as the corresponding projects become available.
 - Use `.ignore` for routine repository searches and file discovery. `rg` reads it automatically. Inspect a build artifact or lockfile directly when the task requires it.
 - Keep generated build output, local settings, and signing material outside source control. Commit sample configuration with placeholder values only.
@@ -28,6 +29,7 @@
 
 - Use `master` as the default PR base. Use the branch or base specified by the user when they provide one.
 - When creating a task branch, use `codex/<type>/<short-slug>`, such as `codex/feat/catalog-validation` or `codex/fix/json-pointer-escaping`. Use lowercase words separated by hyphens. Include the issue number in the slug when it helps identify the task, for example `codex/fix/42-json-pointer-escaping`.
+- Use a separate branch for each issue by default. Share a branch only when the changes need to be reviewed or landed together.
 - Reuse an appropriate task branch when one is already checked out. Preserve unrelated working-tree changes.
 
 ### Commits

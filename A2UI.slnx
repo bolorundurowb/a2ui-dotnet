@@ -9,6 +9,7 @@
     <Project Path="src/A2UI.Core/A2UI.Core.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Conformance/Conformance.csproj" />
     <Project Path="tests/PackageSmoke/PackageSmoke.csproj" />
   </Folder>
 </Solution>

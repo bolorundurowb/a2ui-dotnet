@@ -13,4 +13,7 @@
     <TrimmerRootAssembly Include="A2UI.Agent" />
     <TrimmerRootAssembly Include="A2UI.Core" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../PackageSmoke/CoreSmoke.cs" Link="CoreSmoke.cs" />
+  </ItemGroup>
 </Project>

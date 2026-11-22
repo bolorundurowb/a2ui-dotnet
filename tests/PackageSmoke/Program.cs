@@ -10,7 +10,7 @@ if (Environment.Version != expectedRuntime)
     throw new InvalidOperationException($"Expected .NET {expectedRuntime}, running {Environment.Version}.");
 }
 
-Assembly.Load("A2UI.Core");
+CoreSmoke.Run();
 if (args[1] == "A2UI.Agent")
 {
     Assembly.Load("A2UI.Agent");

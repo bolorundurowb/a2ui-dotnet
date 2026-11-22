@@ -10,4 +10,7 @@
   <ItemGroup Condition="'$(SmokePackage)' != ''">
     <PackageReference Include="$(SmokePackage)" Version="[$(SmokeVersion)]" />
   </ItemGroup>
+  <ItemGroup Condition="'$(SmokePackage)' == ''">
+    <ProjectReference Include="../../src/A2UI.Core/A2UI.Core.csproj" />
+  </ItemGroup>
 </Project>

@@ -1,7 +1,11 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <Description>Headless A2UI protocol and state engine for .NET.</Description>
   </PropertyGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Upstream/*.json" />
+    <None Update="Upstream/LICENSE;Upstream/NOTICE.md" Pack="true" PackagePath="licenses/" />
+  </ItemGroup>
 </Project>
