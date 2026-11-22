@@ -19,7 +19,7 @@ New SDK library dependencies must be MIT-licensed, including their transitive li
 Use a .NET 11 SDK and the .NET 8 through 11 targeting packs and runtimes for the full smoke matrix. Run from the repository root in PowerShell.
 
 ```powershell
-dotnet build A2UI.sln -c Release
+dotnet build A2UI.slnx -c Release
 ./scripts/Test-SdkPackages.ps1
 ./scripts/Get-UpstreamBaseline.ps1
 ```
