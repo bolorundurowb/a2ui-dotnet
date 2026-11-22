@@ -7,6 +7,48 @@ namespace A2UI.Agent;
 /// <summary>Selects the catalogs available to an A2UI 1.0 request.</summary>
 public static class CatalogNegotiation
 {
+    /// <summary>Reads A2UI 1.0 renderer capabilities from request metadata.</summary>
+    /// <param name="metadata">The host's metadata object, which may be null or undefined.</param>
+    /// <param name="capabilities">The owned version-keyed capabilities, or an undefined element when absent.</param>
+    /// <param name="diagnostic">The reason the metadata was rejected, if any.</param>
+    /// <returns>Whether the metadata was read successfully.</returns>
+    public static bool TryReadCapabilities(JsonElement metadata, out JsonElement capabilities, out A2uiDiagnostic? diagnostic)
+    {
+        const string key = "a2uiRendererCapabilities";
+        capabilities = default;
+        diagnostic = null;
+        if (metadata.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            return true;
+        if (metadata.ValueKind != JsonValueKind.Object)
+        {
+            diagnostic = new("CatalogError", "", "Expected a request metadata object.");
+            return false;
+        }
+        if (!metadata.TryGetProperty(key, out var value) || value.ValueKind == JsonValueKind.Null)
+            return true;
+        if (!WireMetadata.TryDecode(Encode(value), WireMetadataKind.RendererCapabilities, out var decoded, out var error))
+        {
+            diagnostic = new("CatalogError", "/" + key + error?.Path, error?.Message ?? "Invalid renderer capabilities.");
+            return false;
+        }
+        var entry = decoded!.Value.GetProperty(WireMessage.Version);
+        if (entry.EnumerateObject().Any(property => property.Name is not ("supportedCatalogIds" or "inlineCatalogs")))
+        {
+            diagnostic = new("CatalogError", "/" + key + "/" + WireMessage.Version, "Unrecognized renderer capability.");
+            return false;
+        }
+        if (entry.TryGetProperty("inlineCatalogs", out var inline) && inline.EnumerateArray().Any(catalog =>
+                !catalog.TryGetProperty("protocolVersion", out var protocol) ||
+                protocol.ValueKind != JsonValueKind.String || !protocol.ValueEquals(WireMessage.Version)))
+        {
+            diagnostic = new("CatalogError", "/" + key + "/" + WireMessage.Version + "/inlineCatalogs",
+                "Inline catalog protocol version must match renderer capabilities.");
+            return false;
+        }
+        capabilities = decoded.Value;
+        return true;
+    }
+
     /// <summary>Resolves a request-local catalog registry from renderer capabilities.</summary>
     /// <param name="registered">The host's configured catalog registry.</param>
     /// <param name="capabilities">The renderer capabilities JSON, or an undefined element when absent.</param>
