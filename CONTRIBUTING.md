@@ -26,6 +26,23 @@ dotnet build A2UI.slnx -c Release
 
 The smoke script packs both SDKs into a fresh local feed, restores each package in a clean consumer for every runtime, and publishes and runs each framework-dependent app. Agent consumers reference Agent alone and load Core through its package dependency. The outputs are under `artifacts/package-smoke/`. The [upstream guide](upstream/README.md) covers fixture provenance and refreshes.
 
+## Pinned conformance and schema comparison
+
+Run the correctness and scaling inventory separately. The JSON reports include
+the upstream revision, case IDs, protocol versions when supplied by the suite,
+and a status and reason for each case. Scaling cases require their own fixture
+adapters. Cases with unavailable SDK behavior have explicit exclusions.
+
+```powershell
+$assets = ./scripts/Get-UpstreamBaseline.ps1
+dotnet run --project tests/Conformance -c Release -- $assets artifacts/conformance.json
+dotnet run --project tests/Conformance -c Release -- $assets artifacts/conformance-scaling.json --scaling
+dotnet run --project tests/SchemaComparison -c Release -- $assets
+```
+
+See the [schema profile and comparison](docs/schema-validation.md) for the
+measured workload and current limits.
+
 ## Trimming and Native AOT
 
 Both SDKs run trim and AOT analysis. Prefer source-generated `System.Text.Json` metadata and explicit registration of catalog and host types. If reflection needs to access members of a caller-supplied type, use `DynamicallyAccessedMembers` with the smallest required member set. Use `RequiresUnreferencedCode` or `RequiresDynamicCode` at an API boundary when an operation cannot satisfy the corresponding deployment mode. Preserve annotations when forwarding types and investigate warnings before using a suppression. [Microsoft trimming guidance](https://learn.microsoft.com/en-us/dotnet/core/deploying/trimming/prepare-libraries-for-trimming)
