@@ -18,3 +18,38 @@ jobs:
         with:
           dotnet-version: '11.0.x'
       - run: dotnet build A2UI.slnx -c Release
+
+  packages:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+            11.0.x
+      - run: ./scripts/Test-SdkPackages.ps1
+
+  deployment:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        mode: [trimmed, aot]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '11.0.x'
+      - name: Publish and run the deployment smoke app
+        shell: pwsh
+        env:
+          DEPLOYMENT_MODE: ${{ matrix.mode }}
+        run: |
+          $output = "artifacts/deployment-smoke/$env:DEPLOYMENT_MODE"
+          $property = if ($env:DEPLOYMENT_MODE -eq 'aot') { 'PublishAot' } else { 'PublishTrimmed' }
+          dotnet publish tests/DeploymentSmoke -c Release -r win-x64 --self-contained "-p:$property=true" -o $output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$output/DeploymentSmoke.exe" $env:DEPLOYMENT_MODE
+          exit $LASTEXITCODE
