@@ -1,10 +1,13 @@
 # A2UI for .NET
 
 [![Build](https://github.com/bolorundurowb/a2ui-dotnet/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/bolorundurowb/a2ui-dotnet/actions/workflows/build.yml)
+[![Upstream conformance](docs/conformance-badge.svg)](https://github.com/bolorundurowb/a2ui-dotnet/actions/workflows/conformance.yml)
 
 A community project for building [A2UI](https://a2ui.org/) (Agent-to-User Interface) agents and processing A2UI messages in .NET. A2UI lets an agent describe interactive interfaces as structured messages. A compatible renderer displays those messages and sends user actions back to the agent.
 
 ## Project status
+
+The conformance badge shows the passing correctness and scaling cases out of the full pinned upstream Core and Agent inventory, including excluded cases in the total.
 
 The packable SDK projects target `net8.0`. The [stable release profile](docs/compatibility.md) lists planned A2UI 1.0 coverage and verification status. See the [contribution guide](CONTRIBUTING.md#build-and-verify) for build and package smoke commands.
 
