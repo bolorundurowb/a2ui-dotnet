@@ -6,6 +6,7 @@ internal static class AgentCases
 {
     internal static bool Supports(string path, JsonElement test) =>
         path == "conformance/agent/catalog_resolution.yaml" ||
+        path == "conformance/agent/catalog_provider.yaml" ||
         path == "conformance/agent/renderer_capabilities.yaml" &&
         test.GetProperty("args").GetProperty("version").ValueEquals("1.0") ||
         path == "conformance/agent/catalog_transformer.yaml" &&
@@ -34,6 +35,23 @@ internal static class AgentCases
             return;
         }
         var registry = new CatalogRegistry(includeBasicCatalog: false);
+        if (test.GetProperty("action").ValueEquals("provide_catalog"))
+        {
+            var path = Path.Combine(assets, "conformance", args.GetProperty("path").GetString()!);
+            var suppliedId = args.TryGetProperty("catalog_id", out var id) ? id.GetString() : null;
+            var suppliedVersion = args.TryGetProperty("protocol_version", out var version) ? version.GetString() : null;
+            var loaded = FileCatalogProvider.TryRegister(registry, path, suppliedId, suppliedVersion, out var providerError);
+            if (test.TryGetProperty("expect_error", out var loadError))
+                Require(!loaded && providerError?.Code == loadError.GetProperty("category").GetString(),
+                    providerError?.ToString() ?? "Expected provider rejection.");
+            else
+            {
+                Require(loaded, providerError?.ToString() ?? "Catalog provider failed.");
+                Require(registry.TryGetDefinition(registry.CatalogIds.Single(), out var definition), "Provided catalog is unavailable.");
+                CheckDefinition(definition, test.GetProperty("expect"));
+            }
+            return;
+        }
         if (test.GetProperty("action").ValueEquals("transform_catalog"))
         {
             Register(registry, args, assets);
