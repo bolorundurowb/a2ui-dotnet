@@ -7,6 +7,7 @@ internal static class CoreCases
 {
     internal static bool Supports(string file, string id) => (file, id) switch
     {
+        ("conformance/core/expressions.yaml", _) when id.StartsWith("test_expr_", StringComparison.Ordinal) => true,
         ("conformance/core/data_model_pointers.yaml" or "conformance/core/data_deletion.yaml", _) => true,
         ("conformance/core/validator_v1_0.yaml", _) when id.StartsWith("test_v10_topology_", StringComparison.Ordinal) ||
             id.StartsWith("test_v10_component_nesting_depth_", StringComparison.Ordinal) ||
@@ -37,6 +38,17 @@ internal static class CoreCases
     {
         switch (file)
         {
+            case "conformance/core/expressions.yaml":
+                var parsed = ExpressionTemplate.TryParse(test.GetProperty("input").GetString()!, out var parts, out var parseError);
+                if (test.TryGetProperty("expect_error", out var expectedError))
+                {
+                    Require(!parsed && parseError is not null && parseError.Code == expectedError.GetProperty("category").GetString() &&
+                        parseError.Message.Contains(expectedError.GetProperty("message").GetString()!, StringComparison.Ordinal),
+                        parseError?.ToString() ?? "Expected parser rejection.");
+                }
+                else
+                    Require(parsed && Equal(test.GetProperty("expect"), parts), parseError?.ToString() ?? "Parsed parts differ.");
+                break;
             case "conformance/core/message_processor_v1_0.yaml":
             case "conformance/core/validator_v1_0.yaml":
             case "conformance/core/data_model_pointers.yaml":

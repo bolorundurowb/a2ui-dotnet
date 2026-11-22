@@ -4,6 +4,8 @@ namespace A2UI.Core;
 
 internal static class UnicodeIdentifiers
 {
+    internal static bool IsContinue(Rune rune) => Contains(Continue, rune.Value);
+
     internal static bool IsIdentifier(string value)
     {
         var first = true;
