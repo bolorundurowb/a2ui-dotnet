@@ -4,7 +4,7 @@ A community project for building [A2UI](https://a2ui.org/) (Agent-to-User Interf
 
 ## Project status
 
-The project is in planning. The [implementation plan](A2UI-DOTNET-PLAN.md) proposes A2UI protocol 1.0 as the first target and defines the experiments needed to validate it. Build instructions and package installation will follow the first implementation.
+The packable SDK projects target `net8.0`. The [stable release profile](docs/compatibility.md) lists planned A2UI 1.0 coverage and verification status. See the [contribution guide](CONTRIBUTING.md#build-and-verify) for build and package smoke commands.
 
 | Planned package | Responsibility |
 | --- | --- |

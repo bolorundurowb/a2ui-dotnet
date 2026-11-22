@@ -1,6 +1,6 @@
 # Contributing to A2UI for .NET
 
-The project is in planning. Start with the [implementation plan](A2UI-DOTNET-PLAN.md). For a proposed design change, name the decision it affects, describe the consumer that needs it, and include any upstream evidence or small experiment that can settle it.
+Start with the [implementation plan](A2UI-DOTNET-PLAN.md) and [stable release profile](docs/compatibility.md). For a proposed design change, name the decision it affects, describe the consumer that needs it, and include any upstream evidence or small experiment that can settle it.
 
 ## Reporting interoperability problems
 
@@ -14,4 +14,14 @@ Use `master` as the default PR base. Agent branch names, commit subjects and PR 
 
 New SDK library dependencies must be MIT-licensed, including their transitive library dependencies. For a performance change, include reproducible measurements and the runtime used.
 
-Build, test and publish commands will be documented here as the SDK projects land.
+## Build and verify
+
+Use a .NET 11 SDK and the .NET 8 through 11 targeting packs and runtimes for the full smoke matrix. Run from the repository root in PowerShell.
+
+```powershell
+dotnet build A2UI.sln -c Release
+./scripts/Test-SdkPackages.ps1
+./scripts/Get-UpstreamBaseline.ps1
+```
+
+The smoke script packs both SDKs into a fresh local feed, restores each package in a clean consumer for every runtime, and publishes and runs each framework-dependent app. Agent consumers reference Agent alone and load Core through its package dependency. The outputs are under `artifacts/package-smoke/`. The [upstream guide](upstream/README.md) covers fixture provenance and refreshes.
