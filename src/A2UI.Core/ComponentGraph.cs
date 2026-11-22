@@ -108,6 +108,14 @@ internal static class ComponentGraph
         return null;
     }
 
+    internal static IReadOnlyList<Edge> GetChildren(JsonElement component, SurfaceSnapshot surface, CatalogRegistry catalogs)
+    {
+        var edges = new List<Edge>();
+        if (catalogs.TryGetComponentSchema(component, surface.CatalogId, out var document, out var schema))
+            Collect(component, schema, document, "", edges, 0, catalogs, surface.CatalogId);
+        return edges;
+    }
+
     private static bool Allows(JsonElement schema, string rule, string type) =>
         !WireJson.IsObject(schema) || !schema.TryGetProperty(rule, out var allowed) ||
         allowed.EnumerateArray().Any(value => value.ValueEquals(type));
@@ -138,7 +146,7 @@ internal static class ComponentGraph
                         break;
                     case "/$defs/ChildList" when value.ValueKind == JsonValueKind.Object &&
                         value.TryGetProperty("componentId", out var id) && id.ValueKind == JsonValueKind.String:
-                        edges.Add(new(id.GetString()!, WireJson.Path(path, "componentId")));
+                        edges.Add(new(id.GetString()!, WireJson.Path(path, "componentId"), value.GetProperty("path").GetString()));
                         break;
                 }
             }
@@ -167,5 +175,5 @@ internal static class ComponentGraph
     }
 
     private sealed record Node(string Type, JsonElement Schema, List<Edge> Edges, string Path);
-    private sealed record Edge(string Id, string Path);
+    internal sealed record Edge(string Id, string Path, string? TemplatePath = null);
 }

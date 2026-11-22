@@ -128,6 +128,22 @@ public sealed class SurfaceSession : IDisposable
         return _surfaces.TryGetValue(id, out snapshot);
     }
 
+    /// <summary>Projects the current mounted component tree with data scopes.</summary>
+    /// <param name="surfaceId">The live surface identifier.</param>
+    /// <param name="maxOccurrences">The maximum number of occurrences to project.</param>
+    /// <param name="cancellationToken">Cancels traversal of the tree.</param>
+    /// <returns>The root occurrence, or null when the surface or its root is absent.</returns>
+    /// <exception cref="InvalidOperationException">The tree exceeds the occurrence limit.</exception>
+    public ComponentOccurrence? GetComponentOccurrences(string surfaceId, int maxOccurrences = 10_000,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxOccurrences);
+        return TryGetSurface(surfaceId, out var snapshot)
+            ? ComponentOccurrences.Resolve(snapshot!, _catalogs, maxOccurrences, cancellationToken)
+            : null;
+    }
+
     /// <summary>Applies a local data write using the same ordering and pointer semantics as a remote update.</summary>
     /// <param name="surfaceId">The identifier of the live surface.</param>
     /// <param name="path">The absolute pointer. Use "/" for the root.</param>

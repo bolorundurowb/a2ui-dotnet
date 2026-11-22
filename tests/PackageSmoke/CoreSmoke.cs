@@ -8,6 +8,7 @@ internal static class CoreSmoke
     internal static void Run()
     {
         var registry = new CatalogRegistry();
+        CheckOccurrences(registry);
         var custom = """
             {
               "catalogId":"test:cards","protocolVersion":"1.0",
@@ -153,6 +154,29 @@ internal static class CoreSmoke
                 Require(arguments["index"].GetProperty("label").ValueEquals("item"));
             return arguments["value"];
         }
+    }
+
+    private static void CheckOccurrences(CatalogRegistry registry)
+    {
+        using var session = new SurfaceSession(registry);
+        var create = Decode($$$"""
+            {"version":"1.0","createSurface":{"surfaceId":"list","catalogId":"{{{CatalogRegistry.BasicCatalogId}}}",
+              "dataModel":{"items":[{"children":[{"name":"Ada"}]}]},
+              "components":[{"id":"root","component":"Column","children":{"componentId":"group","path":"/items"}},
+                {"id":"group","component":"Column","children":{"componentId":"name","path":"children"}},
+                {"id":"name","component":"Text","text":{"@path":"name"}}]}}
+            """);
+        Require(session.Apply(create) is null);
+        var root = session.GetComponentOccurrences("list");
+        var name = root!.Children.Single().Children.Single();
+        Require(name.DataPath == "/items/0/children/0");
+        Require(session.TryGetSurface("list", out var snapshot) &&
+            snapshot!.TryGetScopedData(name.DataPath, "name", out var value) && value.GetString() == "Ada");
+        using var edit = JsonDocument.Parse("\"Grace\"");
+        Require(session.WriteScopedData("list", name.DataPath, "name", edit.RootElement) is null);
+        Require(session.GetComponentOccurrences("list")!.Children[0].Children[0].InstanceId == name.InstanceId);
+        Require(session.Apply(Decode("""{"version":"1.0","deleteSurface":{"surfaceId":"list"}}""")) is null);
+        Require(session.GetComponentOccurrences("list") is null);
     }
 
     private static void CheckDataWrites(SurfaceSession session)
