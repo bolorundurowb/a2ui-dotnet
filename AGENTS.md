@@ -7,6 +7,7 @@
 - Implement A2UI functionality in-house and prefer the .NET base class library. SDK library dependencies, including transitives, must be MIT-licensed. Preserve the original licenses for upstream specification and test assets.
 - Start with a shared `net8.0` baseline and verify .NET 8 through 11. Use `net9.0` as the fallback if the .NET 8 feasibility check identifies a blocker. Keep runtime-specific paths justified by measured results or required APIs.
 - Keep SDK package versions independent of A2UI wire versions. Document any protocol, inference format, catalog, or platform claim with its verification status.
+- Prefer en-NG or en-GB for new work, documentation etc, only public API methods should be in en-US to match the official SDK. If is acceptable to ignore this rule if the official SDK uses for en-US for the section to be named. For existing files, when any area is being touched, use that opportunity to fix the language
 
 ## Protocol and tests
 
@@ -22,6 +23,7 @@
 - Follow `.editorconfig` and keep changes focused. Add build and test commands to `CONTRIBUTING.md` as the corresponding projects become available.
 - Use `.ignore` for routine repository searches and file discovery. `rg` reads it automatically. Inspect a build artifact or lockfile directly when the task requires it.
 - Keep generated build output, local settings, and signing material outside source control. Commit sample configuration with placeholder values only.
+- When work on an issue or PR is done, update the issue or PR with what landed. Check off each acceptance criterion or checklist item that is met, and leave unmet items unchecked with the reason. Move unfinished work to a follow-on issue and link it. Do not check off items that are not verified.
 
 ## Git conventions for agents
 
@@ -45,4 +47,4 @@
 - Use the commit subject format for the PR title and follow `.github/PULL_REQUEST_TEMPLATE.md` for the body. Identify the behavior change, why it is needed, the checks that ran, and any material verification gaps.
 - Use `Closes #<issue-number>` in the PR body by default for each issue the PR addresses. Evaluate each issue independently against its acceptance criteria, required verification, and any remaining work. If that review shows an issue should stay open, use a plain issue reference and explain what remains. In a PR covering multiple issues, use the closing keyword for every issue that is ready to close.
 - Include the protocol version and upstream fixture for interoperability changes, consumer impact for public API changes, and before-and-after measurements for performance changes.
-- When authorized to open a PR, use a draft while verification or required decisions are pending. Push and open the PR only within the user's authorization. Leave merging and history rewrites to explicit user direction.
+- When authorized to open a PR, open it ready for review unless verification or required decisions are still pending. Use a draft only in that case, and move it to ready for review once those items are settled. Push and open the PR only within the user's authorization. Leave merging and history rewrites to explicit user direction.
