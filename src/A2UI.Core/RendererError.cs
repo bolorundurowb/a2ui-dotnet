@@ -8,7 +8,7 @@ namespace A2UI.Core;
 /// the protocol puts on the wire. Create an error from a rejection with <see cref="FromDiagnostic"/>,
 /// <see cref="FromRejectedMessage"/> or <see cref="FromRejectedEnvelope"/>, and send <see cref="ToWireMessage"/>.
 /// </remarks>
-/// <param name="Category">The failure kind: <c>ValidationError</c>, <c>IntegrityError</c>, <c>CatalogError</c>, <c>RecursionError</c>, <c>DataError</c>, <c>ExpressionError</c> or <c>ActionError</c>.</param>
+/// <param name="Category">The failure kind: <c>ValidationError</c>, <c>IntegrityError</c>, <c>CatalogError</c>, <c>RecursionError</c>, <c>DataError</c>, <c>ExpressionError</c>, <c>ExecutionError</c> or <c>ActionError</c>.</param>
 /// <param name="Code">The wire error code, such as <c>VALIDATION_FAILED</c> or <c>INTEGRITY_ERROR</c>.</param>
 /// <param name="Message">A short description of the failure.</param>
 public sealed record RendererError(string Category, string Code, string Message)
@@ -49,6 +49,7 @@ public sealed record RendererError(string Category, string Code, string Message)
                 "unallowedParent" => ("ValidationError", "UNALLOWED_PARENT"),
                 "unallowedChild" => ("ValidationError", "UNALLOWED_CHILD"),
                 "ExpressionError" => ("ExpressionError", "EXPRESSION_ERROR"),
+                "ExecutionError" => ("ExecutionError", "EXECUTION_ERROR"),
                 "invalidAction" => ("ActionError", "INVALID_ACTION"),
                 _ => ("ValidationError", "VALIDATION_FAILED")
             };

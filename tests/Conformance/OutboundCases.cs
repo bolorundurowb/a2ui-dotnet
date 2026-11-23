@@ -88,7 +88,7 @@ internal static class OutboundCases
             CheckWire(error.ToWireMessage(), wire);
     }
 
-    private static void CheckWire(WireMessage message, JsonElement expected)
+    internal static void CheckWire(WireMessage message, JsonElement expected)
     {
         Require(message.Kind == "error" && message.Direction == WireDirection.RendererToAgent, "Expected an error message.");
         var actual = message.Payload;

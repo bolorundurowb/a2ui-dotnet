@@ -88,6 +88,7 @@ internal static class CoreSmoke
         CheckNodeResolver(registry);
         CheckFunctions(registry);
         CheckOutbound(registry);
+        CheckRpc(registry);
 
         session.TryGetSurface("form", out var beforeCancellation);
         var cancelled = new CancellationToken(canceled: true);
@@ -430,6 +431,104 @@ internal static class CoreSmoke
             .GetProperty("inlineCatalogs").GetArrayLength() == registry.CatalogIds.Count);
     }
 
+    private static void CheckRpc(CatalogRegistry registry)
+    {
+        const string create = """
+            {"version":"1.0","createSurface":{"surfaceId":"main","catalogId":"BASIC","dataModel":{"base":"EUR"}}}
+            """;
+        var createMessage = Decode(create.Replace("BASIC", CatalogRegistry.BasicCatalogId, StringComparison.Ordinal));
+        using var first = new SurfaceSession(registry);
+        using var second = new SurfaceSession(registry);
+        Require(first.Apply(createMessage) is null && second.Apply(createMessage) is null);
+        var firstSent = new List<WireMessage>();
+        var secondSent = new List<WireMessage>();
+        using var firstClient = new AgentFunctionClient(firstSent.Add);
+        using var secondClient = new AgentFunctionClient(secondSent.Add);
+        var evaluator = new FunctionEvaluator(registry);
+        using var firstRouter = new FunctionCallRouter(first, registry, evaluator, firstClient);
+        using var secondRouter = new FunctionCallRouter(second, registry, evaluator, secondClient);
+        var errors = new List<RendererError>();
+        firstRouter.ErrorReported += errors.Add;
+
+        // A call the catalog does not declare goes to the agent, and equal calls on one surface share one request.
+        using var rate = JsonDocument.Parse("""{"@call":"fetchRate","args":{"base":{"@path":"/base"}}}""");
+        using var firstBinding = firstRouter.Bind("main", "/", rate.RootElement);
+        using var sharing = firstRouter.Bind("main", "/", rate.RootElement);
+        using var secondBinding = secondRouter.Bind("main", "/", rate.RootElement);
+        Require(firstSent.Count == 1 && secondSent.Count == 1 && firstBinding.IsPending && firstBinding.Passes);
+        var request = firstSent[0].Payload;
+        Require(request.GetProperty("callFunction").GetProperty("catalogId").GetString() == CatalogRegistry.BasicCatalogId &&
+            request.GetProperty("callFunction").GetProperty("args").GetProperty("base").GetString() == "EUR");
+
+        // An answer settles only the session that sent the call, even though the surface IDs match.
+        string Answer(string id, string body) =>
+            """{"version":"1.0","agentFunctionResponse":{"functionCallId":"ID",BODY}}"""
+                .Replace("ID", id, StringComparison.Ordinal).Replace("BODY", body, StringComparison.Ordinal);
+        var answer = Decode(Answer(request.GetProperty("functionCallId").GetString()!, "\"value\":1.08"));
+        Require(!secondRouter.ReceiveResponse(answer) && secondBinding.IsPending);
+        Require(firstRouter.ReceiveResponse(answer) && firstBinding.Value.GetDouble() == 1.08 && sharing.Value.GetDouble() == 1.08);
+        Require(!firstRouter.ReceiveResponse(answer));
+
+        // A failed call is reported once and is not sent again until its arguments change.
+        using var failing = JsonDocument.Parse("""{"@call":"fetchRate","args":{"base":{"@path":"/other"}}}""");
+        using var failed = firstRouter.Bind("main", "/", failing.RootElement);
+        var failedId = firstSent[1].Payload.GetProperty("functionCallId").GetString()!;
+        Require(firstRouter.ReceiveResponse(Decode(Answer(failedId, "\"error\":{\"code\":\"EXECUTION_ERROR\",\"message\":\"Offline\"}"))));
+        using var change = JsonDocument.Parse("1");
+        Require(first.WriteData("main", "/unrelated", change.RootElement) is null && firstSent.Count == 2);
+        Require(failed.HasFailed && errors.Count == 1 && errors[0].Code == "EXPRESSION_ERROR" && errors[0].FunctionCallId == failedId);
+        using var dollar = JsonDocument.Parse("\"USD\"");
+        Require(first.WriteData("main", "/other", dollar.RootElement) is null && firstSent.Count == 3);
+
+        // Deleting the surface cancels the pending call without an error.
+        Require(first.Apply(Decode("""{"version":"1.0","deleteSurface":{"surfaceId":"main"}}""")) is null);
+        Require(firstClient.PendingCount == 0 && errors.Count == 1);
+
+        // The agent calls a renderer function. The host function runs only where the catalog allows an agent caller.
+        const string catalog = """
+            {"catalogId":"test:host","protocolVersion":"1.0","components":{},"functions":{
+              "ping":{"type":"object","returnType":"object","allowedCallers":"rendererOrAgent",
+                "properties":{"@call":{"const":"ping"},"args":{"type":"object","properties":{"n":{"type":"number"}},"required":["n"]}},
+                "required":["@call","args"]},
+              "boom":{"type":"object","returnType":"any","allowedCallers":"agentOnly",
+                "properties":{"@call":{"const":"boom"},"args":{"type":"object"}},"required":["@call","args"]},
+              "local":{"type":"object","returnType":"any",
+                "properties":{"@call":{"const":"local"},"args":{"type":"object"}},"required":["@call","args"]}}}
+            """;
+        var host = new CatalogRegistry(includeBasicCatalog: false);
+        Require(host.TryRegister(Encoding.UTF8.GetBytes(catalog), out var hostProblem), hostProblem);
+        var hostFunctions = new FunctionEvaluator(host);
+        hostFunctions.RegisterHostFunction("test:host", "ping", call =>
+            JsonDocument.Parse("""{"pong":N}""".Replace("N", call.Args["n"].GetRawText(), StringComparison.Ordinal)).RootElement.Clone());
+        hostFunctions.RegisterHostFunction("test:host", "boom", _ => throw new InvalidOperationException("secret"));
+        var handler = new RendererFunctionHandler(host, hostFunctions);
+        JsonElement Call(string name, string args) => handler.Handle(Decode("""
+            {"version":"1.0","callRendererFunction":{"functionCallId":"r1","callFunction":{"@call":"NAME","catalogId":"test:host","args":ARGS}}}
+            """.Replace("NAME", name, StringComparison.Ordinal).Replace("ARGS", args, StringComparison.Ordinal))).Payload;
+        Require(Call("ping", """{"n":2}""").GetProperty("value").GetProperty("pong").GetInt32() == 2);
+        Require(Call("ping", """{"n":"x"}""").GetProperty("error").GetProperty("code").GetString() == "INVALID_FUNCTION_CALL");
+        Require(Call("local", "{}").GetProperty("error").GetProperty("code").GetString() == "INVALID_FUNCTION_CALL");
+        var boom = Call("boom", "{}").GetProperty("error");
+        Require(boom.GetProperty("code").GetString() == "EXECUTION_ERROR" &&
+            !boom.GetProperty("message").GetString()!.Contains("secret", StringComparison.Ordinal));
+
+        // A call that nobody answers times out, and a late answer is ignored.
+        var timed = new List<WireMessage>();
+        using var timing = new AgentFunctionClient(timed.Add);
+        using var slow = JsonDocument.Parse("""{"@call":"wait","catalogId":"x","args":{}}""");
+        var pending = timing.CallAsync("main", slow.RootElement, "late", TimeSpan.FromMilliseconds(20));
+        var timedOut = false;
+        try
+        {
+            pending.Wait(TimeSpan.FromSeconds(5));
+        }
+        catch (AggregateException failure)
+        {
+            timedOut = failure.InnerException is AgentFunctionException { Code: "TIMEOUT" };
+        }
+        Require(timedOut);
+        Require(!timing.TryHandleResponse(Decode(Answer("late", "\"value\":1"))));
+    }
     private static void CheckOccurrences(CatalogRegistry registry)
     {
         using var session = new SurfaceSession(registry);

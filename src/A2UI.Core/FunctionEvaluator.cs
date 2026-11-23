@@ -11,8 +11,9 @@ namespace A2UI.Core;
 /// call's catalog. A call inside a <c>formatString</c> template always runs in the catalog that <c>formatString</c>
 /// resolved to, because template syntax cannot name a catalog.
 /// Failures use the diagnostic code as the error category: <c>CatalogError</c>, <c>ExpressionError</c> or
-/// <c>ValidationError</c>. The evaluator implements the functions of the Basic Catalog only. A catalog that declares
-/// other functions can route to them, but they fail with an <c>ExpressionError</c> because no implementation exists.
+/// <c>ValidationError</c>. The evaluator implements the functions of the Basic Catalog and the functions registered with
+/// <see cref="RegisterHostFunction"/>. A call to any other function fails with an <c>ExpressionError</c>. Use
+/// <see cref="FunctionCallRouter"/> to send such calls to the agent.
 /// </remarks>
 public sealed class FunctionEvaluator
 {
@@ -22,6 +23,7 @@ public sealed class FunctionEvaluator
     private const int MaxNesting = 64;
     private readonly CatalogRegistry _catalogs;
     private readonly Action<Uri>? _openUrl;
+    private readonly Dictionary<(string CatalogId, string Name), HostFunction> _hostFunctions = new();
 
     /// <summary>Creates an evaluator.</summary>
     /// <param name="catalogs">The registry that holds the catalogs calls route to.</param>
@@ -30,6 +32,19 @@ public sealed class FunctionEvaluator
     {
         _catalogs = catalogs ?? throw new ArgumentNullException(nameof(catalogs));
         _openUrl = openUrl;
+    }
+
+    /// <summary>Registers the implementation of a function that a catalog declares but the SDK does not implement.</summary>
+    /// <param name="catalogId">The catalog that declares the function.</param>
+    /// <param name="name">The function name.</param>
+    /// <param name="implementation">The host code that runs the call. An exception it throws becomes an <c>EXECUTION_ERROR</c> with a fixed message, so internal details never reach the agent.</param>
+    /// <remarks>A host function takes precedence over a Basic Catalog function of the same name. Register functions before the first call. The evaluator does not synchronize registration.</remarks>
+    public void RegisterHostFunction(string catalogId, string name, HostFunction implementation)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(catalogId);
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentNullException.ThrowIfNull(implementation);
+        _hostFunctions[(catalogId, name)] = implementation;
     }
 
     /// <summary>Evaluates a function call against a surface.</summary>
@@ -95,8 +110,7 @@ public sealed class FunctionEvaluator
             return false;
         if (!TryArguments(surface, dataPath, call, userInitiated, depth, out var args, out diagnostic))
             return false;
-        return BasicFunctions.TryInvoke(name, args, CreateContext(surface, dataPath, catalogId!, userInitiated),
-            out value, out diagnostic);
+        return TryInvoke(surface, dataPath, catalogId!, name, args, userInitiated, out value, out diagnostic);
     }
 
     private bool TryCallSystem(SurfaceSnapshot surface, string dataPath, JsonElement call, bool userInitiated, int depth,
@@ -136,31 +150,79 @@ public sealed class FunctionEvaluator
 
     private bool TryRoute(string surfaceId, string? catalogId, string name, bool userInitiated, out A2uiDiagnostic? diagnostic)
     {
+        switch (Classify(surfaceId, defaultCatalogId: null, catalogId, name, userInitiated, out _, out var declared, out diagnostic))
+        {
+            case CallRoute.Local:
+                return true;
+            case CallRoute.Agent:
+                return Fail(declared
+                    ? $"Function '{name}' has no implementation."
+                    : $"Function '{name}' is not defined in catalog '{catalogId}'.", out diagnostic);
+            default:
+                return false;
+        }
+    }
+
+    // Decides where a call runs. The router sends an Agent call to the agent, and the evaluator refuses it.
+    internal CallRoute Classify(string surfaceId, string? defaultCatalogId, string? explicitCatalogId, string name,
+        bool userInitiated, out string? catalogId, out bool declared, out A2uiDiagnostic? diagnostic)
+    {
+        catalogId = explicitCatalogId ?? defaultCatalogId;
+        declared = false;
         if (catalogId is null)
         {
             diagnostic = new("CatalogError", "",
                 $"Surface '{surfaceId}' has no default catalogId, and the call to '{name}' names none.");
-            return false;
+            return CallRoute.Refused;
         }
         if (!_catalogs.TryGetDefinition(catalogId, out var definition))
         {
             diagnostic = new("CatalogError", "", $"Catalog not found: {catalogId}");
-            return false;
+            return CallRoute.Refused;
         }
-        if (!definition.TryGetProperty("functions", out var functions) || !functions.TryGetProperty(name, out var declaration))
-            return Fail($"Function '{name}' is not defined in catalog '{catalogId}'.", out diagnostic);
-        if (declaration.TryGetProperty("allowedCallers", out var callers) && callers.ValueEquals("agentOnly"))
-            return Fail($"Function '{name}' cannot be called by renderer.", out diagnostic);
-        if (!userInitiated && declaration.TryGetProperty("requiresUserActivation", out var activation) &&
-            activation.ValueKind == JsonValueKind.True)
-            return Fail($"Function '{name}' requires user activation.", out diagnostic);
-        if (!BasicFunctions.Names.Contains(name))
-            return Fail($"Function '{name}' has no implementation.", out diagnostic);
 
         diagnostic = null;
-        return true;
+        if (!definition.TryGetProperty("functions", out var functions) || !functions.TryGetProperty(name, out var declaration))
+            return CallRoute.Agent;
+        declared = true;
+        if (declaration.TryGetProperty("allowedCallers", out var callers) && callers.ValueEquals("agentOnly"))
+        {
+            Fail($"Function '{name}' cannot be called by renderer.", out diagnostic);
+            return CallRoute.Refused;
+        }
+        if (!userInitiated && declaration.TryGetProperty("requiresUserActivation", out var activation) &&
+            activation.ValueKind == JsonValueKind.True)
+        {
+            Fail($"Function '{name}' requires user activation.", out diagnostic);
+            return CallRoute.Refused;
+        }
+        return IsImplemented(catalogId, name) ? CallRoute.Local : CallRoute.Agent;
     }
 
+    internal bool IsImplemented(string catalogId, string name) =>
+        _hostFunctions.ContainsKey((catalogId, name)) || BasicFunctions.Names.Contains(name);
+
+    // Runs a call whose arguments are already resolved. The caller has classified it as local.
+    internal bool TryInvoke(SurfaceSnapshot surface, string dataPath, string catalogId, string name,
+        IReadOnlyDictionary<string, JsonElement> args, bool userInitiated, out JsonElement value, out A2uiDiagnostic? diagnostic)
+    {
+        if (!_hostFunctions.TryGetValue((catalogId, name), out var implementation))
+            return BasicFunctions.TryInvoke(name, args, CreateContext(surface, dataPath, catalogId, userInitiated),
+                out value, out diagnostic);
+
+        try
+        {
+            value = implementation(new(catalogId, name, args, surface.Id, userInitiated));
+            diagnostic = null;
+            return true;
+        }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            value = default;
+            diagnostic = new("ExecutionError", "", "An error occurred during function execution.");
+            return false;
+        }
+    }
     private FunctionContext CreateContext(SurfaceSnapshot surface, string dataPath, string catalogId, bool userInitiated)
     {
         surface.TryGetScopedData(dataPath, "", out var scope);
@@ -178,8 +240,7 @@ public sealed class FunctionEvaluator
                     : Fail($"System function '{name}' is not defined.", out diagnostic);
             if (!TryRoute(surface.Id, catalogId, name, userInitiated, out diagnostic))
                 return false;
-            return BasicFunctions.TryInvoke(name, args, CreateContext(surface, dataPath, catalogId!, userInitiated),
-                out value, out diagnostic);
+            return TryInvoke(surface, dataPath, catalogId!, name, args, userInitiated, out value, out diagnostic);
         };
 
     private bool TryArguments(SurfaceSnapshot surface, string dataPath, JsonElement call, bool userInitiated, int depth,
