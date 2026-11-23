@@ -5,6 +5,8 @@ using A2UI.Core;
 internal static class AgentCases
 {
     internal static bool Supports(string path, JsonElement test) =>
+        path == "conformance/agent/direct_json/prompt_generator.yaml" ||
+        path == "conformance/agent/skill.yaml" && test.GetProperty("name").GetString()!.StartsWith("test_direct_json_", StringComparison.Ordinal) ||
         path == "conformance/agent/direct_json/compiler.yaml" ||
         path == "conformance/agent/direct_json/decompiler.yaml" && !test.GetProperty("name").ValueEquals("test_decompile_json_catalog_qualified_components") ||
         path == "conformance/agent/direct_json/response_parser.yaml" ||
@@ -19,6 +21,11 @@ internal static class AgentCases
 
     internal static void Run(JsonElement test, string assets)
     {
+        if (test.GetProperty("action").GetString() is "generate_prompt_snippet" or "monolithic_skill_equals_prompt_snippet")
+        {
+            CheckPrompt(test, assets);
+            return;
+        }
         if (test.GetProperty("action").ValueEquals("renderer_state_turns"))
         {
             RunRendererState(test, assets);
@@ -149,6 +156,46 @@ internal static class AgentCases
     private static void CompareNames(IEnumerable<string> actual, JsonElement expected) =>
         Require(actual.Order(StringComparer.Ordinal).SequenceEqual(
             expected.EnumerateArray().Select(item => item.GetString()).Order(StringComparer.Ordinal)), "Catalog names differ.");
+
+    private static void CheckPrompt(JsonElement test, string assets)
+    {
+        var args = test.GetProperty("args");
+        var registry = new CatalogRegistry(false);
+        foreach (var item in args.GetProperty("catalogs").EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String)
+                Require(registry.TryRegister(File.ReadAllBytes(Path.Combine(assets, item.GetString()!)), out var problem),
+                    problem?.ToString() ?? "Catalog registration failed.");
+            else Register(registry, item, assets);
+        }
+        var examples = args.TryGetProperty("examples", out var list) ? list.EnumerateArray().Select(e =>
+            File.ReadAllText(Path.Combine(assets, "conformance", e.GetString()!))).ToArray() : null;
+        var allowed = args.TryGetProperty("allowed_messages", out var kinds)
+            ? kinds.EnumerateArray().Select(e => e.GetString()!).ToArray() : null;
+        var issue = DirectJsonPrompt.Create(registry, out var prompt, examples, allowed);
+        if (test.TryGetProperty("expect_error", out var error))
+        {
+            Require(error.GetProperty("category").ValueEquals(issue?.Code), "Unexpected prompt diagnostic.");
+            return;
+        }
+        Require(prompt is not null && issue is null, issue?.ToString() ?? "Prompt generation failed.");
+        if (test.TryGetProperty("expect_file", out var file))
+        {
+            var expected = File.ReadAllText(Path.Combine(assets, "conformance", file.GetString()!)).ReplaceLineEndings("\n").Trim();
+            var actual = prompt!.Text.Trim();
+            var i = 0;
+            while (i < Math.Min(expected.Length, actual.Length) && expected[i] == actual[i]) i++;
+            Require(i == expected.Length && i == actual.Length, $"Prompt differs at {i}: expected {expected.Substring(i, Math.Min(45, expected.Length - i))}, got {actual.Substring(i, Math.Min(45, actual.Length - i))}.");
+        }
+        if (test.TryGetProperty("expect_contains", out var fragments))
+            foreach (var fragment in fragments.EnumerateArray())
+                Require(prompt!.Text.Contains(fragment.GetString()!, StringComparison.Ordinal), "Example order differs.");
+        if (test.TryGetProperty("expect_deterministic", out _))
+            Require(DirectJsonPrompt.Create(registry, out var again, examples, allowed) is null &&
+                again!.Text == prompt!.Text, "Prompt differs between calls.");
+        if (test.GetProperty("action").ValueEquals("monolithic_skill_equals_prompt_snippet"))
+            Require(prompt!.ToSkill().Split("---\n", 3)[2].Trim() == prompt.Text.Trim(), "Skill body differs.");
+    }
 
     private static void CheckCompiler(JsonElement test, string assets)
     {

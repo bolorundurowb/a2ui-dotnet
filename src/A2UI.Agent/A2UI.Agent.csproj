@@ -1,6 +1,8 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <EmbeddedResource Include="Upstream/Workflow.txt" />
+    <None Update="Upstream/LICENSE;Upstream/NOTICE.md" Pack="true" PackagePath="licenses/" />
     <ProjectReference Include="..\A2UI.Core\A2UI.Core.csproj" />
   </ItemGroup>
 

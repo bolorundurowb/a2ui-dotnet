@@ -1,0 +1,1 @@
+Workflow.txt contains DEFAULT_WORKFLOW_RULES from python/a2ui_agent/src/a2ui/constants.py, with the Direct JSON tag constants expanded. Copyright 2024 Google LLC. Licensed under Apache-2.0. Revision d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe of https://github.com/a2ui-project/a2ui.

@@ -2,7 +2,8 @@ using System.Text.Json;
 
 namespace A2UI.Core;
 
-internal static class ProtocolSchemas
+/// <summary>The pinned A2UI protocol schemas used by both SDKs.</summary>
+public static class ProtocolSchemas
 {
     private const string BaseUri = "https://a2ui.org/specification/v1_0/";
     internal static bool IsCommonTypes(string reference) =>
@@ -25,6 +26,12 @@ internal static class ProtocolSchemas
         var name = reference.StartsWith(BaseUri, StringComparison.Ordinal) ? reference[BaseUri.Length..] : reference;
         return Schemas.TryGetValue(name, out var schema) ? schema : null;
     }
+
+    /// <summary>The immutable A2UI 1.0 agent-to-renderer schema.</summary>
+    public static JsonElement AgentToRenderer => Schemas["agent_to_renderer.json"];
+
+    /// <summary>The immutable A2UI 1.0 common types schema.</summary>
+    public static JsonElement CommonTypes => Schemas["common_types.json"];
 
     internal static JsonElement Read(string name)
     {

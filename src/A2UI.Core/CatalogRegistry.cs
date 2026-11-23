@@ -125,9 +125,16 @@ public sealed class CatalogRegistry
             var references = new JsonArray();
             foreach (var entry in selected)
                 references.Add((JsonNode)new JsonObject { ["$ref"] = "#" + WireJson.Path(WireJson.Path("", group), entry.Key) });
-            definitions[group == "components" ? "anyComponent" : "anyFunction"] = references.Count == 0
-                ? JsonValue.Create(false)
-                : new JsonObject { ["oneOf"] = references };
+            var union = group == "components" ? "anyComponent" : "anyFunction";
+            if (references.Count == 0)
+                definitions[union] = false;
+            else if (group == "components" && definitions[union] is JsonObject existing)
+            {
+                existing["oneOf"] = references;
+                existing["discriminator"] ??= new JsonObject { ["propertyName"] = "component" };
+            }
+            else
+                definitions[union] = new JsonObject { ["oneOf"] = references };
         }
         return true;
     }
