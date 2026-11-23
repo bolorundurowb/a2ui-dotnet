@@ -56,6 +56,18 @@ internal static class AgentSmoke
     internal static void Run()
     {
         CheckDelivery();
+        using var mirror = new RendererState(new CatalogRegistry());
+        const string response = """Hello <a2ui-json>{"version":"1.0","createSurface":{"surfaceId":"form"}}</a2ui-json> Done""";
+        var issue = DirectJson.ParseResponse(response, mirror, out var parts, out var candidate);
+        using var turn = candidate;
+        if (issue is not null || turn is null || parts.Count != 3 || parts[0].Text != "Hello" ||
+            parts[2].Text != "Done" || parts[1].Messages?.Count != 1)
+            throw new InvalidOperationException(issue?.ToString() ?? "Mixed response did not compile.");
+        turn.Commit();
+        turn.Acknowledge(parts[1].Messages![0]);
+        var broken = DirectJson.ParseResponse("Before <a2ui-json>[", mirror, out var partial, out var rejected);
+        if (broken?.Code != "ParseError" || partial.Count != 1 || partial[0].Text != "Before" || rejected is not null)
+            throw new InvalidOperationException("Truncated response lost its diagnostic prefix.");
         var host = new CatalogRegistry();
         using var capabilities = JsonDocument.Parse("""
             {"1.0":{"supportedCatalogIds":["https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json","unknown"]}}

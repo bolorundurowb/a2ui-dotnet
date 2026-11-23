@@ -42,6 +42,8 @@ foreach (var suite in new[] { "core", "agent" })
                 (_, "v0.8" or "v0.9" or "v0.9.1" or "0.8" or "0.9" or "0.9.1", _) => "Legacy protocol is outside the profile.",
                 (_, _, _) when path.StartsWith("conformance/agent/legacy/", StringComparison.Ordinal) => "Legacy protocol is outside the profile.",
                 (_, _, "conformance/core/adapter_conformance.yaml") => "Renderer adapter is outside the headless profile.",
+                (_, _, "conformance/agent/direct_json/decompiler.yaml") when id == "test_decompile_json_catalog_qualified_components" =>
+                    "Fixture uses bare catalogId on components without a default. Pinned 1.0 wire protocol requires @catalogId.",
                 _ when runScaling => null,
                 (_, _, "conformance/core/message_processor_scaling.yaml") when id == "test_scaling_process_single_component_messages_v10" =>
                     "SurfaceSession requires topology validation and has no unchecked processing mode.",

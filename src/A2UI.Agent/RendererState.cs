@@ -11,7 +11,13 @@ public sealed class RendererState : IDisposable
 
     /// <summary>Creates an empty mirror.</summary>
     /// <param name="catalogs">The configured request-local catalog registry.</param>
-    public RendererState(CatalogRegistry catalogs) => _session = new(catalogs);
+    public RendererState(CatalogRegistry catalogs)
+    {
+        _session = new(catalogs);
+        Catalogs = catalogs;
+    }
+
+    internal CatalogRegistry Catalogs { get; }
 
     /// <summary>Returns a committed snapshot for a live surface.</summary>
     /// <param name="id">The surface identifier.</param>
@@ -38,9 +44,25 @@ public sealed class RendererState : IDisposable
             var touched = new HashSet<string>(StringComparer.Ordinal);
             foreach (var message in messages)
             {
-                if (candidate.Apply(message, cancellationToken) is { } error)
-                    return error;
-                touched.Add(message.Payload.GetProperty("surfaceId").GetString()!);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (message.Direction == WireDirection.AgentToRenderer && message.Kind == "callRendererFunction")
+                {
+                    string? defaultId = null;
+                    if (message.Payload.TryGetProperty("surfaceId", out var surface))
+                    {
+                        if (!candidate.TryGetSurface(surface.GetString()!, out var snapshot))
+                            return new("ValidationError", "/surfaceId", "Surface does not exist.");
+                        defaultId = snapshot!.CatalogId;
+                    }
+                    if (DirectJson.CheckCall(message.Payload.GetProperty("callFunction"), defaultId, Catalogs, true) is { } rpcError)
+                        return rpcError;
+                }
+                else if (message.Direction != WireDirection.AgentToRenderer || message.Kind != "agentFunctionResponse")
+                {
+                    if (candidate.Apply(message, cancellationToken) is { } error)
+                        return error;
+                    touched.Add(message.Payload.GetProperty("surfaceId").GetString()!);
+                }
                 ordered.Add(message);
             }
             foreach (var id in touched)
