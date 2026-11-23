@@ -1,0 +1,74 @@
+name: Upstream conformance
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [correctness, scaling]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            11.0.x
+      - name: Run the pinned suite inventory
+        shell: pwsh
+        env:
+          CONFORMANCE_MODE: ${{ matrix.mode }}
+        run: |
+          $assets = ./scripts/Get-UpstreamBaseline.ps1
+          dotnet build tests/Conformance -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $report = "artifacts/$env:CONFORMANCE_MODE.json"
+          $options = @()
+          if ($env:CONFORMANCE_MODE -eq 'scaling') { $options += '--scaling' }
+          dotnet run --project tests/Conformance -c Release --no-build -- $assets $report @options
+          if ($LASTEXITCODE -gt 1 -or !(Test-Path -LiteralPath $report)) { throw 'The conformance runner failed.' }
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: conformance-${{ matrix.mode }}
+          path: artifacts/${{ matrix.mode }}.json
+          if-no-files-found: error
+
+  summary:
+    needs: report
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: conformance-*
+          path: artifacts
+          merge-multiple: true
+      - name: Generate the badge
+        shell: pwsh
+        run: |
+          ./scripts/New-ConformanceBadge.ps1 artifacts/correctness.json artifacts/scaling.json artifacts/conformance-badge.svg |
+            Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+      - uses: actions/upload-artifact@v4
+        with:
+          name: conformance-badge
+          path: artifacts/conformance-badge.svg
+          if-no-files-found: error
+      - name: Check correctness results
+        shell: pwsh
+        run: |
+          $results = (Get-Content artifacts/correctness.json -Raw | ConvertFrom-Json).results
+          if ($results.Where({ $_.status -eq 'fail' }).Count -gt 0) { throw 'Upstream correctness cases failed.' }
