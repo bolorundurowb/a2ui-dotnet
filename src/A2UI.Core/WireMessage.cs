@@ -85,6 +85,12 @@ public sealed class WireMessage
         if (kind is null)
             return Reject("invalidEnvelope", "", "Expected exactly one message kind.", out diagnostic);
 
+        if (kind == "callRendererFunction" && CheckFunctionCall(envelope.GetProperty(kind)) is { } callProblem)
+        {
+            diagnostic = callProblem;
+            return false;
+        }
+
         diagnostic = ProtocolSchemas.ValidateMessage(envelope, kind, direction);
         if (diagnostic is not null)
             return false;
@@ -98,6 +104,21 @@ public sealed class WireMessage
     /// <summary>Writes the envelope as one JSON value.</summary>
     /// <param name="writer">The destination JSON writer.</param>
     public void WriteTo(Utf8JsonWriter writer) => Envelope.WriteTo(writer);
+
+    // The schema reports an invalid call as one failure. Naming the member lets the sender fix it.
+    private static A2uiDiagnostic? CheckFunctionCall(JsonElement payload)
+    {
+        if (!WireJson.IsObject(payload))
+            return null;
+        const string root = "/callRendererFunction";
+        if (!payload.TryGetProperty("callFunction", out var call) || !WireJson.IsObject(call))
+            return new("invalidFunctionCall", root + "/callFunction", "callFunction is required and must be an object.");
+        if (call.TryGetProperty("args", out var args) && !WireJson.IsObject(args))
+            return new("invalidFunctionCall", root + "/callFunction/args", "args must be an object.");
+        if (!call.TryGetProperty("catalogId", out var catalogId) || catalogId.ValueKind != JsonValueKind.String)
+            return new("invalidFunctionCall", root + "/callFunction/catalogId", "catalogId is required and must be a string.");
+        return null;
+    }
 
     private static bool Reject(string code, string path, string message, out A2uiDiagnostic diagnostic)
     {

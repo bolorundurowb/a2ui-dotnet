@@ -209,6 +209,23 @@ internal static class CoreCases
 
     private static void RunLifecycle(JsonElement test, string assets)
     {
+        var registry = BuildRegistry(test, assets);
+        var strict = test.TryGetProperty("strictMode", out var strictMode) && strictMode.GetBoolean();
+        var validate = test.TryGetProperty("action", out var action) && action.ValueEquals("validate");
+        using var session = new SurfaceSession(registry, strict ? GraphValidationOptions.Strict : GraphValidationOptions.Progressive);
+        if (test.TryGetProperty("steps", out var steps))
+        {
+            foreach (var step in steps.EnumerateArray())
+                RunStep(session, step, validate);
+            CheckSurfaces(session, test);
+        }
+        else
+            RunStep(session, test, validate);
+    }
+
+    // The registry holds the pinned Basic Catalog under the aliases the fixtures use, plus any catalogs the case declares.
+    internal static CatalogRegistry BuildRegistry(JsonElement test, string assets)
+    {
         var catalog = JsonNode.Parse(File.ReadAllBytes(Path.Combine(assets, "catalogs/basic/v1/catalog.json")))!;
         var registry = new CatalogRegistry();
         // Some pinned fixtures refer to the Basic Catalog using test aliases or its previous URI.
@@ -226,18 +243,7 @@ internal static class CoreCases
             foreach (var definition in definitions.EnumerateArray())
                 if (definition.TryGetProperty("catalogId", out _))
                     RegisterCatalog(registry, JsonNode.Parse(definition.GetRawText())!.AsObject());
-
-        var strict = test.TryGetProperty("strictMode", out var strictMode) && strictMode.GetBoolean();
-        var validate = test.TryGetProperty("action", out var action) && action.ValueEquals("validate");
-        using var session = new SurfaceSession(registry, strict ? GraphValidationOptions.Strict : GraphValidationOptions.Progressive);
-        if (test.TryGetProperty("steps", out var steps))
-        {
-            foreach (var step in steps.EnumerateArray())
-                RunStep(session, step, validate);
-            CheckSurfaces(session, test);
-        }
-        else
-            RunStep(session, test, validate);
+        return registry;
     }
 
     private static void RegisterCatalog(CatalogRegistry registry, JsonObject definition)
@@ -287,9 +293,9 @@ internal static class CoreCases
                 null => null,
                 "graphDepth" when validate => "RecursionError",
                 "duplicateComponent" or "circularReference" or "missingRoot" or "orphanComponent" or "danglingReference" or
-                    "invalidComposition" or "graphDepth" when validate => "ValidationError",
+                    "unallowedParent" or "unallowedChild" or "graphDepth" when validate => "ValidationError",
                 "unknownSurface" or "duplicateSurface" or "duplicateComponent" or "circularReference" or "missingRoot" or
-                    "orphanComponent" or "danglingReference" or "invalidComposition" or "graphDepth" => "IntegrityError",
+                    "orphanComponent" or "danglingReference" or "unallowedParent" or "unallowedChild" or "graphDepth" => "IntegrityError",
                 "invalidDataPath" => "DataError",
                 "unknownCatalog" when !validate => "CatalogError",
                 "unsupportedMessage" => null,

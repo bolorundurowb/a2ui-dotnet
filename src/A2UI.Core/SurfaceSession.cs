@@ -144,6 +144,39 @@ public sealed class SurfaceSession : IDisposable
             : null;
     }
 
+    /// <summary>Collects the data models of the live surfaces that asked for synchronization with <c>sendDataModel</c>.</summary>
+    /// <returns>The <c>surfaces</c> metadata to attach to each message that goes to the agent, or null when no surface opted in.</returns>
+    /// <remarks>
+    /// A session belongs to one agent connection, so the metadata only carries data that surface's owning agent created
+    /// the surface for. Surfaces that did not opt in never appear. Two sessions never share surfaces, even with equal IDs.
+    /// </remarks>
+    public WireMetadata? GetRendererDataModel()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        using var stream = new MemoryStream();
+        var count = 0;
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("version", WireMessage.Version);
+            writer.WriteStartObject("surfaces");
+            foreach (var surface in _surfaces.Values.Where(item => item.SendDataModel).OrderBy(item => item.Id, StringComparer.Ordinal))
+            {
+                writer.WritePropertyName(surface.Id);
+                surface.DataModel.WriteTo(writer);
+                count++;
+            }
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        if (count == 0)
+            return null;
+        if (!WireMetadata.TryDecode(stream.ToArray(), WireMetadataKind.RendererDataModel, out var metadata, out var problem))
+            throw new InvalidOperationException($"The data models do not form valid metadata: {problem}");
+        return metadata;
+    }
+
     /// <summary>Applies a local data write using the same ordering and pointer semantics as a remote update.</summary>
     /// <param name="surfaceId">The identifier of the live surface.</param>
     /// <param name="path">The absolute pointer. Use "/" for the root.</param>
@@ -158,7 +191,7 @@ public sealed class SurfaceSession : IDisposable
         if (_notifying)
             return new("reentrantUpdate", "", "Complete the current notification before updating the session.");
         if (!_surfaces.TryGetValue(surfaceId, out var snapshot))
-            return new("unknownSurface", "/surfaceId", "No live surface uses this ID.");
+            return new("unknownSurface", "/surfaceId", $"Surface '{surfaceId}' does not exist.");
         if (value.ValueKind == JsonValueKind.Undefined)
             return new("invalidDataValue", "/value", "Expected a JSON value.");
         if (!WireJson.TryRead(System.Text.Encoding.UTF8.GetBytes(value.GetRawText()), out var owned, out var error))
@@ -210,13 +243,13 @@ public sealed class SurfaceSession : IDisposable
             return null;
         if (creating == exists)
             return new(creating ? "duplicateSurface" : "unknownSurface", kindPath + "/surfaceId",
-                creating ? "A live surface already uses this ID." : "No live surface uses this ID.");
+                creating ? $"Surface '{id}' already exists." : $"Surface '{id}' does not exist.");
 
         if (creating)
         {
             var catalogId = payload.TryGetProperty("catalogId", out var catalog) ? catalog.GetString() : null;
             if (catalogId is not null && !_catalogs.TryGetDefinition(catalogId, out _))
-                return new("unknownCatalog", kindPath + "/catalogId", "Surface catalog is unavailable.");
+                return new("unknownCatalog", kindPath + "/catalogId", $"Catalog not found: {catalogId}");
             var send = payload.TryGetProperty("sendDataModel", out var sendFlag) && sendFlag.GetBoolean();
             var data = payload.TryGetProperty("dataModel", out var inlineData) ? inlineData : EmptyDataModel;
             snapshot = new(id, catalogId, send, data,
@@ -234,7 +267,7 @@ public sealed class SurfaceSession : IDisposable
                 var componentPath = kindPath + "/components/" + index++.ToString(CultureInfo.InvariantCulture);
                 var componentId = component.GetProperty("id").GetString()!;
                 if (!updatePaths.TryAdd(componentId, componentPath))
-                    return new("duplicateComponent", componentPath + "/id", "Component ID is repeated in the update.");
+                    return new("duplicateComponent", componentPath + "/id", $"Duplicate component ID '{componentId}' in the update.");
                 if (_catalogs.ValidateComponent(component, snapshot.CatalogId) is { } problem)
                     return problem with { Path = componentPath + problem.Path };
                 components[componentId] = component;
@@ -269,6 +302,9 @@ public sealed class SurfaceSession : IDisposable
     private A2uiDiagnostic? UpdateData(SurfaceSnapshot snapshot, string path, JsonElement value,
         string diagnosticPath, CancellationToken cancellationToken)
     {
+        if (DataPointer.TryParse(path, out var parsed) &&
+            parsed.FirstOrDefault(segment => segment is "__proto__" or "constructor" or "prototype") is { } forbidden)
+            return new("forbiddenPathKey", diagnosticPath, $"The path '{path}' uses the forbidden key '{forbidden}'.");
         if (!DataPointer.TryParse(path, out var segments) ||
             !DataPointer.TryUpdate(snapshot.DataModel, segments, value, out var result))
             return new("invalidDataPath", diagnosticPath, "The data model cannot be updated at this pointer.");

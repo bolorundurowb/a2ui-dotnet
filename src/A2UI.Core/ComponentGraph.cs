@@ -47,15 +47,17 @@ internal static class ComponentGraph
         if (nodes.Count == 0)
             return null;
         if (nodes.TryGetValue(root, out var rootNode) && !Allows(rootNode.Schema, "allowedParents", "Surface"))
-            return new("invalidComposition", rootNode.Path, "The root component cannot be a child of Surface.");
+            return new("unallowedParent", rootNode.Path, $"Component type '{rootNode.Type}' cannot be a child of Surface.");
         foreach (var node in nodes.Values)
         {
             foreach (var edge in node.Edges)
             {
                 if (nodes.TryGetValue(edge.Id, out var child))
                 {
-                    if (!Allows(node.Schema, "allowedChildren", child.Type) || !Allows(child.Schema, "allowedParents", node.Type))
-                        return new("invalidComposition", edge.Path, "The catalog disallows this parent and child pair.");
+                    if (!Allows(node.Schema, "allowedChildren", child.Type))
+                        return new("unallowedChild", edge.Path, $"Component type '{child.Type}' is not an allowed child of '{node.Type}'.");
+                    if (!Allows(child.Schema, "allowedParents", node.Type))
+                        return new("unallowedParent", child.Path, $"Component type '{child.Type}' cannot be a child of '{node.Type}'.");
                 }
                 else if (!options.AllowDanglingReferences)
                     return new("danglingReference", edge.Path, $"Dangling reference to unavailable component {edge.Id}.");
@@ -72,7 +74,7 @@ internal static class ComponentGraph
             if (depths.ContainsKey(id))
                 continue;
             if (!options.AllowOrphanComponents)
-                return new("orphanComponent", node.Path, "The component is not reachable from the root.");
+                return new("orphanComponent", node.Path, $"Component '{id}' is not reachable from the root.");
             if (Visit(id, nodes, depths, path, 0, cancellationToken) is { } orphanError)
                 return orphanError;
         }
@@ -88,7 +90,7 @@ internal static class ComponentGraph
         if (depths.TryGetValue(id, out var cached))
         {
             if (cached < 0)
-                return new("circularReference", path, "Circular component reference.");
+                return new("circularReference", path, $"Circular component reference at '{id}'.");
             return depth + cached > 50 ? new("graphDepth", path, "Global recursion limit exceeded.") : null;
         }
 

@@ -49,6 +49,23 @@ public sealed class FunctionEvaluator
         return TryCall(surface, dataPath, call, userInitiated, 0, out value, out diagnostic);
     }
 
+    /// <summary>Resolves the bindings and function calls inside a JSON value, such as the context of an action.</summary>
+    /// <param name="surface">The committed surface the value is read on.</param>
+    /// <param name="dataPath">The absolute pointer to the data scope of the value.</param>
+    /// <param name="value">A literal, a <c>@path</c> binding, a <c>@call</c> or an object or array that contains them.</param>
+    /// <param name="userInitiated">Whether a user action started the resolution.</param>
+    /// <param name="resolved">The value with every binding and call replaced by its result. A path with no data resolves to null.</param>
+    /// <param name="diagnostic">The failure, with the error category in <see cref="A2uiDiagnostic.Code"/>.</param>
+    /// <returns>Whether the value resolved.</returns>
+    /// <remarks>A member name that starts with <c>@@</c> is a literal member whose name loses one <c>@</c>. Any other member name that starts with <c>@</c> is rejected.</remarks>
+    public bool TryResolveValue(SurfaceSnapshot surface, string dataPath, JsonElement value, bool userInitiated,
+        out JsonElement resolved, out A2uiDiagnostic? diagnostic)
+    {
+        ArgumentNullException.ThrowIfNull(surface);
+        ArgumentNullException.ThrowIfNull(dataPath);
+        return TryResolve(surface, dataPath, value, userInitiated, 0, out resolved, out diagnostic);
+    }
+
     private bool TryCall(SurfaceSnapshot surface, string dataPath, JsonElement call, bool userInitiated, int depth,
         out JsonElement value, out A2uiDiagnostic? diagnostic)
     {
@@ -223,9 +240,14 @@ public sealed class FunctionEvaluator
                 var members = new JsonObject();
                 foreach (var member in value.EnumerateObject())
                 {
+                    var name = member.Name;
+                    if (name.StartsWith("@@", StringComparison.Ordinal))
+                        name = name[1..];
+                    else if (name.StartsWith('@'))
+                        return Fail($"Unknown key '{name}'. Write '@{name}' for a literal key.", out diagnostic);
                     if (!TryResolveNode(surface, dataPath, member.Value, userInitiated, depth, out var child, out diagnostic))
                         return false;
-                    members[member.Name] = child;
+                    members[name] = child;
                 }
                 node = members;
                 return true;

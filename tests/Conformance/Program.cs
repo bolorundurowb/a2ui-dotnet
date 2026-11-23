@@ -49,6 +49,8 @@ foreach (var suite in new[] { "core", "agent" })
                     "SurfaceSession requires topology validation and has no unchecked processing mode.",
                 _ when !scaling && CoreCases.Supports(path, id) => null,
                 _ when !scaling && FunctionCases.Supports(path, test) => null,
+                _ when OutboundCases.Handles(path) && OutboundCases.ExclusionReason(path, id) is { } outboundReason => outboundReason,
+                _ when !scaling && OutboundCases.Handles(path) => null,
                 (_, _, "conformance/core/functions.yaml" or "conformance/core/index_function.yaml")
                     when FunctionCases.ExclusionReason(path, test) is { } why => why,
                 (_, _, "conformance/core/node_resolution.yaml") when NodeCases.Supports(id) => null,
@@ -80,6 +82,8 @@ foreach (var suite in new[] { "core", "agent" })
                         Console.WriteLine($"{id} {CoreScaling.Run(test, assets)}");
                     else if (suite == "agent")
                         AgentCases.Run(test, assets);
+                    else if (OutboundCases.Handles(path))
+                        OutboundCases.Run(path, test, assets);
                     else if (path == "conformance/core/node_resolution.yaml")
                         NodeCases.Run(test, assets);
                     else if (path is "conformance/core/functions.yaml" or "conformance/core/validation_result.yaml"
