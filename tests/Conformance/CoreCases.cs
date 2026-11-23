@@ -44,6 +44,22 @@ internal static class CoreCases
             "test_batch_multi_stage_lifecycle_pipeline" or "test_permissive_mode_allows_orphan_components" or
             "test_permissive_mode_allows_dangling_references" or "test_v10_permissive_incremental_streaming_out_of_order_before_root" or
             "test_composition_constraints_preserved_on_partial_parent_update") => true,
+        ("conformance/core/agent_to_renderer.yaml", "test_v10_agent_to_renderer_schema_matches_specification") => true,
+        ("conformance/core/common_types.yaml", "test_v10_common_types_schema_matches_specification") => true,
+        ("conformance/core/reserved_keys.yaml", _) when id is not
+            ("test_escaped_doubled_at_unescaping" or "test_escaped_doubled_at_metadata_unescaping") => true,
+        ("conformance/core/validator_v1_0.yaml",
+            "test_v10_validate_at_prefixed_component_envelope_mixins" or
+            "test_v10_validate_component_envelope_conflict_at_and_bare_error" or
+            "test_v10_validate_at_checks_on_non_checkable_component_error") => true,
+        ("conformance/core/message_processor_v1_0.yaml",
+            "test_v10_component_with_non_string_catalog_id_errors" or "test_v10_call_with_non_string_catalog_id_errors" or
+            "test_v10_update_components_rejects_null_legacy_catalog_id" or
+            "test_v10_custom_envelope_properties_declared_in_combiner_branches") => true,
+        ("conformance/core/common_types.yaml",
+            "test_v10_index_system_function_requires_call" or "test_v10_index_system_function_rejects_null_args" or
+            "test_v10_surface_component_is_surface" or "test_v10_surface_rejects_explicit_null" or
+            "test_v10_dynamic_value_object_branches_are_exclusive") => true,
         ("conformance/core/common_types.yaml",
             "test_v10_function_response_has_exactly_one_outcome" or "test_v10_function_response_rejects_null_error" or
             "test_v10_extensions_keys_are_unicode_identifiers" or "test_v10_component_metadata_only_holds_extensions" or
@@ -82,13 +98,20 @@ internal static class CoreCases
             case "conformance/core/validator_v1_0.yaml":
             case "conformance/core/data_model_pointers.yaml":
             case "conformance/core/data_deletion.yaml":
+            case "conformance/core/reserved_keys.yaml":
                 RunLifecycle(test, assets);
                 break;
             case "conformance/core/catalog.yaml":
                 RunCatalog(test, assets);
                 break;
+            case "conformance/core/agent_to_renderer.yaml":
+                RunSchemaParity(test, assets);
+                break;
             case "conformance/core/common_types.yaml":
-                RunCommonTypes(test);
+                if (test.GetProperty("action").ValueEquals("common_types_schema"))
+                    RunSchemaParity(test, assets);
+                else
+                    RunCommonTypes(test);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(file));
@@ -131,8 +154,92 @@ internal static class CoreCases
         }
     }
 
+    // Core serves the pinned schema documents instead of deriving them from SDK models, so parity means the
+    // public entry points return the specification files without change.
+    private static void RunSchemaParity(JsonElement test, string assets)
+    {
+        var schema = test.GetProperty("action").GetString() switch
+        {
+            "agent_to_renderer_schema" => ProtocolSchemas.AgentToRenderer,
+            "common_types_schema" => ProtocolSchemas.CommonTypes,
+            var action => throw new InvalidDataException($"Unknown schema action {action}.")
+        };
+        using var expected = JsonDocument.Parse(File.ReadAllText(Path.Combine(assets, test.GetProperty("expectFile").GetString()!)));
+        Require(Equal(schema, expected.RootElement), "The schema differs from the specification file.");
+    }
+
+    // These definitions are not reachable from an envelope on their own. The probe catalog gives each one a
+    // component property, so the check runs through the public wire decoder and surface session. A function
+    // call is checked against the catalog's function list, so the catalog declares the `now` call the fixture uses.
+    private static void RunCommonTypeProbe(JsonElement test)
+    {
+        var definition = test.GetProperty("definition").GetString()!;
+        foreach (var step in test.GetProperty("steps").EnumerateArray())
+        {
+            var registry = new CatalogRegistry();
+            RegisterCatalog(registry, new JsonObject
+            {
+                ["catalogId"] = "probe",
+                ["functions"] = new JsonObject
+                {
+                    ["now"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["returnType"] = "string",
+                        ["properties"] = new JsonObject { ["@call"] = new JsonObject { ["const"] = "now" } },
+                        ["required"] = new JsonArray("@call")
+                    }
+                },
+                ["components"] = new JsonObject
+                {
+                    ["Probe"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject
+                        {
+                            ["value"] = new JsonObject { ["$ref"] = "common_types.json#/$defs/" + definition }
+                        }
+                    }
+                }
+            });
+            using var session = new SurfaceSession(registry);
+            var value = step.GetProperty("value").GetRawText();
+            A2uiDiagnostic? diagnostic = null;
+            foreach (var message in new[]
+            {
+                """{"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"probe"}}""",
+                $$$"""{"version":"1.0","updateComponents":{"surfaceId":"s","components":[{"id":"root","component":"Probe","value":{{{value}}}}]}}"""
+            })
+            {
+                if (!WireMessage.TryDecode(Encoding.UTF8.GetBytes(message), WireDirection.AgentToRenderer,
+                        out var decoded, out diagnostic))
+                    break;
+                diagnostic = session.Apply(decoded!);
+                if (diagnostic is not null)
+                    break;
+            }
+
+            if (step.TryGetProperty("expectError", out _))
+            {
+                Require(diagnostic is not null, $"Expected {definition} to reject {value}.");
+                continue;
+            }
+
+            Require(diagnostic is null, $"{definition} rejected {value}: {diagnostic}");
+            Require(session.TryGetSurface("s", out var surface) && surface is not null &&
+                Equal(surface.Components["root"].GetProperty("value"), step.GetProperty("value")),
+                $"The accepted {definition} value was not preserved.");
+        }
+    }
+
     private static void RunCommonTypes(JsonElement test)
     {
+        if (test.GetProperty("definition").GetString() is "Surface" or "DynamicValue" or "IndexSystemFunction")
+        {
+            RunCommonTypeProbe(test);
+            return;
+        }
+
         var name = test.GetProperty("name").GetString();
         foreach (var step in test.GetProperty("steps").EnumerateArray())
         {
