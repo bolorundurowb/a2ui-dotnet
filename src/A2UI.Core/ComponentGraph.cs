@@ -58,7 +58,7 @@ internal static class ComponentGraph
                         return new("invalidComposition", edge.Path, "The catalog disallows this parent and child pair.");
                 }
                 else if (!options.AllowDanglingReferences)
-                    return new("danglingReference", edge.Path, "Dangling reference to a component that is unavailable.");
+                    return new("danglingReference", edge.Path, $"Dangling reference to unavailable component {edge.Id}.");
             }
         }
         if (rootNode is null && !options.AllowMissingRoot)
