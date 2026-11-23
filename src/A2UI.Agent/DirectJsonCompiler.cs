@@ -57,7 +57,7 @@ public static partial class DirectJson
         return null;
     }
 
-    private static A2uiDiagnostic? Decode(string raw, out IReadOnlyList<WireMessage> messages)
+    internal static A2uiDiagnostic? Decode(string raw, out IReadOnlyList<WireMessage> messages)
     {
         ArgumentNullException.ThrowIfNull(raw);
         messages = Array.Empty<WireMessage>();

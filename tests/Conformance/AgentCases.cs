@@ -5,10 +5,11 @@ using A2UI.Core;
 internal static class AgentCases
 {
     internal static bool Supports(string path, JsonElement test) =>
+        path == "conformance/agent/direct_json/response_streaming.yaml" &&
+            !test.GetProperty("args").GetRawText().Contains("catalog_v0_", StringComparison.Ordinal) ||
         path == "conformance/agent/request_processor.yaml" &&
             test.GetProperty("args").TryGetProperty("format", out var format) && format.ValueEquals("direct_json") &&
             !test.GetProperty("args").TryGetProperty("format_override", out _) &&
-            !test.GetProperty("args").TryGetProperty("probe_chunks", out _) && !test.TryGetProperty("then_stream", out _) &&
             !test.GetProperty("name").GetString()!.Contains("v0_9", StringComparison.Ordinal) ||
         path == "conformance/agent/direct_json/prompt_generator.yaml" ||
         path == "conformance/agent/skill.yaml" && test.GetProperty("name").GetString()!.StartsWith("test_direct_json_", StringComparison.Ordinal) ||
@@ -25,6 +26,11 @@ internal static class AgentCases
 
     internal static void Run(JsonElement test, string assets)
     {
+        if (test.GetProperty("action").ValueEquals("parse_chunk"))
+        {
+            StreamCases.Run(test, assets);
+            return;
+        }
         if (test.GetProperty("action").GetString() is "create_format" or "create_processor")
         {
             CheckProcessor(test, assets);
@@ -215,6 +221,19 @@ internal static class AgentCases
         using var state = processor!.CreateSession();
         using var other = processor.CreateSession();
         Require(!ReferenceEquals(state, other), "Parser sessions must be independent.");
+        if (test.TryGetProperty("then_stream", out var stream))
+            StreamCases.Steps(stream, new DirectJsonStream(state));
+        if (args.TryGetProperty("probe_chunks", out var chunks))
+        {
+            var first = new DirectJsonStream(state);
+            var second = new DirectJsonStream(other);
+            foreach (var chunk in chunks.EnumerateArray())
+            {
+                Require(first.Read(chunk.GetString()!, out var one) is null &&
+                    second.Read(chunk.GetString()!, out var two) is null && one.Count == two.Count,
+                    "Parser streams failed isolation probe.");
+            }
+        }
         if (test.TryGetProperty("then_parse", out var parse))
         {
             var diagnostic = DirectJson.ParseResponse(parse.GetProperty("input").GetString()!, state, out var parts, out var turn);

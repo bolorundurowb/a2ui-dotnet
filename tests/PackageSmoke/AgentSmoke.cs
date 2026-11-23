@@ -53,9 +53,46 @@ internal static class AgentSmoke
                 out var message, out var diagnostic) ? message! : throw new InvalidOperationException(diagnostic?.ToString());
     }
 
+    private static void CheckStreaming()
+    {
+        using var state = new RendererState(new CatalogRegistry());
+        var stream = new DirectJsonStream(state);
+        try
+        {
+            stream.Read("<a2ui-json>", out _, cancellationToken: new CancellationToken(true));
+            throw new InvalidOperationException("A cancelled read succeeded.");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        // The cancelled read consumed nothing, so the same stream still accepts the first message,
+        // and a bad second message is rejected without retracting the message already sent.
+        var first = """{"version":"1.0","createSurface":{"surfaceId":"s"}}""";
+        var bad = """{"version":"1.0","updateDataModel":{"surfaceId":"gone","value":1}}""";
+        var issue = stream.Read("<a2ui-json>[" + first + "," + bad + ",", out var sent);
+        if (issue?.Code != "ValidationError" || sent.Count != 1 || sent[0].Messages?.Count != 1 ||
+            !state.TryGetSurface("s", out _))
+            throw new InvalidOperationException(issue?.ToString() ?? "A failure after a partial send retracted output.");
+        try
+        {
+            stream.Read("]</a2ui-json>", out _);
+            throw new InvalidOperationException("A failed stream accepted more input.");
+        }
+        catch (InvalidOperationException) when (state.TryGetSurface("s", out _))
+        {
+        }
+
+        using var limited = new RendererState(new CatalogRegistry());
+        var small = new DirectJsonStream(limited, maxCharacters: 16);
+        if (small.Read("<a2ui-json>[" + first, out _)?.Code != "ResourceLimit")
+            throw new InvalidOperationException("The stream size limit was not enforced.");
+    }
+
     internal static void Run()
     {
         CheckDelivery();
+        CheckStreaming();
         using var mirror = new RendererState(new CatalogRegistry());
         const string response = """Hello <a2ui-json>{"version":"1.0","createSurface":{"surfaceId":"form"}}</a2ui-json> Done""";
         var issue = DirectJson.ParseResponse(response, mirror, out var parts, out var candidate);
