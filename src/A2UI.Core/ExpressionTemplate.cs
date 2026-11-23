@@ -22,6 +22,21 @@ public static class ExpressionTemplate
         Func<string?, string, IReadOnlyDictionary<string, JsonElement>, JsonElement>? invoke,
         out string? result, out A2uiDiagnostic? diagnostic)
     {
+        FunctionInvoker? invoker = invoke is null
+            ? null
+            : (string? callCatalogId, string name, IReadOnlyDictionary<string, JsonElement> args,
+                out JsonElement value, out A2uiDiagnostic? failure) =>
+            {
+                value = invoke(callCatalogId, name, args);
+                failure = null;
+                return true;
+            };
+        return TryEvaluateWith(template, dataModel, scope, catalogId, invoker, out result, out diagnostic);
+    }
+
+    internal static bool TryEvaluateWith(string template, JsonElement dataModel, JsonElement scope, string? catalogId,
+        FunctionInvoker? invoke, out string? result, out A2uiDiagnostic? diagnostic)
+    {
         result = null;
         if (!TryParse(template, out var parts, out diagnostic))
             return false;
@@ -85,8 +100,7 @@ public static class ExpressionTemplate
         }
     }
 
-    private sealed class Evaluator(JsonElement root, JsonElement scope, string? catalogId,
-        Func<string?, string, IReadOnlyDictionary<string, JsonElement>, JsonElement>? invoke)
+    private sealed class Evaluator(JsonElement root, JsonElement scope, string? catalogId, FunctionInvoker? invoke)
     {
         internal bool TryResolve(JsonElement part, out JsonElement value, out A2uiDiagnostic? diagnostic)
         {
@@ -121,8 +135,7 @@ public static class ExpressionTemplate
                     return false;
                 arguments.Add(argument.Name, resolved);
             }
-            value = invoke(name.StartsWith('@') ? null : catalogId, name, arguments);
-            return true;
+            return invoke(name.StartsWith('@') ? null : catalogId, name, arguments, out value, out diagnostic);
         }
     }
 

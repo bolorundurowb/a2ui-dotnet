@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -32,6 +31,34 @@ public enum ResolvedPropertyKind
 public sealed record ResolvedProperty(ResolvedPropertyKind Kind, JsonElement? Value, bool Writable,
     string? BindingPath, IReadOnlyList<string> ChildPositions);
 
+/// <summary>The outcome of one check rule on a component.</summary>
+public enum CheckState
+{
+    /// <summary>The condition has no value yet: its binding has no data or its function call failed.</summary>
+    Unresolved,
+
+    /// <summary>The condition waits for an answer from the agent. Nothing produces this state until agent function routing exists.</summary>
+    Pending,
+
+    /// <summary>The condition passed.</summary>
+    Valid,
+
+    /// <summary>The condition failed.</summary>
+    Invalid
+}
+
+/// <summary>A validation result produced by a check rule.</summary>
+/// <param name="Valid">Whether the check passed.</param>
+/// <param name="Code">A machine-readable reason from the validation function or data, or null.</param>
+/// <param name="Message">The text to show for a failed check, or null.</param>
+/// <param name="Severity">The severity: <c>error</c> blocks validity, while <c>warning</c> and <c>info</c> do not.</param>
+public sealed record ValidationResult(bool Valid, string? Code, string? Message, string Severity);
+
+/// <summary>A check rule with its current state.</summary>
+/// <param name="State">The state of the rule.</param>
+/// <param name="Result">The validation result, or null while the rule is unresolved or pending.</param>
+public sealed record CheckResult(CheckState State, ValidationResult? Result);
+
 /// <summary>A mounted component occurrence with its resolved properties.</summary>
 /// <remarks>Instances are reused for as long as their occurrence stays mounted, so callers can compare node references across updates.</remarks>
 public sealed class ResolvedNode
@@ -57,6 +84,24 @@ public sealed class ResolvedNode
     public IReadOnlyDictionary<string, ResolvedProperty> Props { get; internal set; } =
         new Dictionary<string, ResolvedProperty>(StringComparer.Ordinal);
 
+    /// <summary>The check rules from <c>@checks</c> or <c>checks</c>, in declaration order.</summary>
+    public IReadOnlyList<CheckResult> Checks { get; internal set; } = [];
+
+    /// <summary>Whether no check with error severity has failed. Warnings, information and unresolved rules do not block.</summary>
+    public bool IsValid => BlockingResult is null;
+
+    /// <summary>The failed results, in declaration order, including warnings and information.</summary>
+    public IReadOnlyList<ValidationResult> ValidationResults =>
+        Checks.Where(check => check.State == CheckState.Invalid).Select(check => check.Result!).ToList();
+
+    /// <summary>The messages of the failed results with error severity, in declaration order.</summary>
+    public IReadOnlyList<string> ValidationErrors =>
+        ValidationResults.Where(result => result.Severity == "error").Select(result => result.Message ?? "").ToList();
+
+    /// <summary>The first failed result with error severity, or null when the node is valid.</summary>
+    public ValidationResult? BlockingResult =>
+        ValidationResults.FirstOrDefault(result => result.Severity == "error");
+
     internal string Signature { get; set; } = "";
 }
 
@@ -71,6 +116,7 @@ public sealed class NodeResolver : IDisposable
     private static readonly JsonElement FalseValue = ProtocolSchemas.Parse("false");
     private readonly SurfaceSession _session;
     private readonly CatalogRegistry _catalogs;
+    private readonly FunctionEvaluator _functions;
     private readonly string _surfaceId;
     private Dictionary<string, ResolvedNode> _nodesByInstance = new(StringComparer.Ordinal);
     private bool _disposed;
@@ -79,10 +125,12 @@ public sealed class NodeResolver : IDisposable
     /// <param name="session">The session that owns the surface.</param>
     /// <param name="catalogs">The registry that supplies component schemas.</param>
     /// <param name="surfaceId">The identifier of the surface to resolve.</param>
-    public NodeResolver(SurfaceSession session, CatalogRegistry catalogs, string surfaceId)
+    /// <param name="functions">The evaluator for computed bindings and check conditions. Defaults to one over <paramref name="catalogs"/>.</param>
+    public NodeResolver(SurfaceSession session, CatalogRegistry catalogs, string surfaceId, FunctionEvaluator? functions = null)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _catalogs = catalogs ?? throw new ArgumentNullException(nameof(catalogs));
+        _functions = functions ?? new FunctionEvaluator(catalogs);
         _surfaceId = surfaceId ?? throw new ArgumentNullException(nameof(surfaceId));
         _session.Changed += OnChanged;
         Refresh();
@@ -154,7 +202,8 @@ public sealed class NodeResolver : IDisposable
         void Visit(ComponentOccurrence occurrence)
         {
             var properties = ResolveProperties(occurrence, snapshot!);
-            var signature = Signature(properties);
+            var checks = ResolveChecks(occurrence, snapshot!);
+            var signature = Signature(properties, checks);
             var isNew = !previous.TryGetValue(occurrence.InstanceId, out var node);
             if (isNew)
             {
@@ -171,6 +220,7 @@ public sealed class NodeResolver : IDisposable
             node.ComponentType = occurrence.ComponentType;
             node.DataPath = occurrence.DataPath;
             node.Props = properties;
+            node.Checks = checks;
             node.Signature = signature;
             next[occurrence.InstanceId] = node;
             ordered.Add(node);
@@ -193,7 +243,7 @@ public sealed class NodeResolver : IDisposable
         return properties;
     }
 
-    private static ResolvedProperty ResolveProperty(ComponentOccurrence occurrence, string name, JsonElement value,
+    private ResolvedProperty ResolveProperty(ComponentOccurrence occurrence, string name, JsonElement value,
         SurfaceSnapshot surface, bool coerceBoolean)
     {
         var childPositions = ChildPositions(occurrence, name);
@@ -210,11 +260,11 @@ public sealed class NodeResolver : IDisposable
             return Binding(data, coerceBoolean, writable: true, path);
         }
 
-        if (value.ValueKind == JsonValueKind.Object && value.TryGetProperty("@call", out var function))
+        if (value.ValueKind == JsonValueKind.Object && value.TryGetProperty("@call", out _))
         {
-            JsonElement? result = function.ValueEquals("@index")
-                ? IndexValue(occurrence, value, surface)
-                : null;
+            // A failed call leaves the binding without a value, like a path with no data.
+            JsonElement? result = _functions.TryEvaluate(surface, occurrence.DataPath, value, userInitiated: false,
+                out var computed, out _) ? computed : null;
             return Binding(result, coerceBoolean, writable: false, null);
         }
 
@@ -227,28 +277,63 @@ public sealed class NodeResolver : IDisposable
     private static ResolvedProperty Binding(JsonElement? value, bool coerceBoolean, bool writable, string? path)
     {
         if (coerceBoolean)
-            value = BooleanElement(CoerceBoolean(value));
+            value = BooleanElement(FunctionValues.ToBoolean(value));
         return new(ResolvedPropertyKind.Binding, value, writable, path, []);
     }
 
-    // Only the reserved @index function is evaluated here. Its value is the item index in the enclosing collection plus
-    // the offset argument, so a computed binding outside a collection has no value.
-    private static JsonElement? IndexValue(ComponentOccurrence occurrence, JsonElement call, SurfaceSnapshot surface)
+    // A rule's condition is a path or a function call that yields a boolean or a validation result object.
+    private IReadOnlyList<CheckResult> ResolveChecks(ComponentOccurrence occurrence, SurfaceSnapshot surface)
     {
-        var segment = occurrence.DataPath[(occurrence.DataPath.LastIndexOf('/') + 1)..];
-        if (!int.TryParse(segment, NumberStyles.None, CultureInfo.InvariantCulture, out var index) ||
-            !call.TryGetProperty("args", out var args) || !args.TryGetProperty("offset", out var offsetArgument))
-            return null;
+        if ((!occurrence.Definition.TryGetProperty("@checks", out var rules) &&
+             !occurrence.Definition.TryGetProperty("checks", out rules)) || rules.ValueKind != JsonValueKind.Array)
+            return [];
 
-        JsonElement? offset = offsetArgument.TryGetProperty("@path", out var pointer) &&
-            pointer.ValueKind == JsonValueKind.String
-            ? surface.TryGetScopedData(occurrence.DataPath, pointer.GetString()!, out var bound) ? bound : null
-            : offsetArgument;
-        if (offset is not { ValueKind: JsonValueKind.Number } number || !number.TryGetInt64(out var amount))
-            return null;
+        var results = new List<CheckResult>();
+        foreach (var rule in rules.EnumerateArray())
+        {
+            if (rule.ValueKind != JsonValueKind.Object || !rule.TryGetProperty("condition", out var condition))
+                continue;
+            var message = rule.TryGetProperty("message", out var text) && text.ValueKind == JsonValueKind.String
+                ? text.GetString()
+                : null;
 
-        return ProtocolSchemas.Parse((index + amount).ToString(CultureInfo.InvariantCulture));
+            JsonElement value;
+            bool resolved;
+            if (condition.ValueKind == JsonValueKind.Object && condition.TryGetProperty("@path", out var pointer) &&
+                pointer.ValueKind == JsonValueKind.String)
+                resolved = surface.TryGetScopedData(occurrence.DataPath, pointer.GetString()!, out value) &&
+                    value.ValueKind != JsonValueKind.Null;
+            else
+                resolved = _functions.TryEvaluate(surface, occurrence.DataPath, condition, userInitiated: false,
+                    out value, out _);
+
+            results.Add(resolved ? Evaluate(value, message) : new CheckResult(CheckState.Unresolved, null));
+        }
+        return results;
     }
+
+    private static CheckResult Evaluate(JsonElement value, string? ruleMessage)
+    {
+        string? code = null, functionMessage = null, severity = "error";
+        bool valid;
+        if (value.ValueKind == JsonValueKind.Object && value.TryGetProperty("valid", out var flag) &&
+            flag.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            valid = flag.GetBoolean();
+            code = ReadText(value, "code");
+            functionMessage = ReadText(value, "message");
+            severity = ReadText(value, "severity") ?? "error";
+        }
+        else
+            valid = FunctionValues.ToBoolean(value);
+
+        return valid
+            ? new CheckResult(CheckState.Valid, new ValidationResult(true, code, null, severity))
+            : new CheckResult(CheckState.Invalid, new ValidationResult(false, code, ruleMessage ?? functionMessage, severity));
+    }
+
+    private static string? ReadText(JsonElement owner, string name) =>
+        owner.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     private static bool IsAction(JsonElement value) =>
         value.ValueKind == JsonValueKind.Object && value.EnumerateObject().Count() == 1 &&
@@ -292,23 +377,14 @@ public sealed class NodeResolver : IDisposable
         return false;
     }
 
-    // Coercion follows the core blueprint's Boolean rules for DynamicBoolean properties.
-    private static bool CoerceBoolean(JsonElement? value) => value switch
-    {
-        null => false,
-        { ValueKind: JsonValueKind.True } => true,
-        { ValueKind: JsonValueKind.String } text => string.Equals(text.GetString(), "true", StringComparison.OrdinalIgnoreCase),
-        { ValueKind: JsonValueKind.Number } number => number.GetDouble() != 0,
-        { ValueKind: JsonValueKind.Object } validation when validation.TryGetProperty("valid", out var valid) &&
-            valid.ValueKind is JsonValueKind.True or JsonValueKind.False => valid.GetBoolean(),
-        _ => false
-    };
-
     private static JsonElement BooleanElement(bool value) => value ? TrueValue : FalseValue;
 
-    private static string Signature(IReadOnlyDictionary<string, ResolvedProperty> properties)
+    private static string Signature(IReadOnlyDictionary<string, ResolvedProperty> properties, IReadOnlyList<CheckResult> checks)
     {
         var builder = new StringBuilder();
+        foreach (var check in checks)
+            builder.Append(check.State).Append('|').Append(check.Result).Append(';');
+        builder.Append('#');
         foreach (var (name, property) in properties.OrderBy(entry => entry.Key, StringComparer.Ordinal))
         {
             builder.Append(name).Append('|').Append(property.Kind).Append('|').Append(property.Writable).Append('|')
