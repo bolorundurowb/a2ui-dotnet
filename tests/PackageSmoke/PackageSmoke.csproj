@@ -13,4 +13,10 @@
   <ItemGroup Condition="'$(SmokePackage)' == ''">
     <ProjectReference Include="../../src/A2UI.Core/A2UI.Core.csproj" />
   </ItemGroup>
+  <PropertyGroup Condition="'$(SmokePackage)' == 'A2UI.Agent'">
+    <DefineConstants>$(DefineConstants);AGENT_PACKAGE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(SmokePackage)' != 'A2UI.Agent'">
+    <Compile Remove="AgentSmoke.cs" />
+  </ItemGroup>
 </Project>

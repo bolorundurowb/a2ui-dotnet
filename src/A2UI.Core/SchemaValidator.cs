@@ -23,7 +23,7 @@ internal sealed class SchemaValidator(Func<string, JsonElement?> resolve, bool d
         if (item.Error is not null)
             return item.Error;
         foreach (var member in instance.EnumerateObject())
-            if (!envelope.Contains(member.Name) && !item.Contains(member.Name))
+            if (!member.NameEquals("component") && !envelope.Contains(member.Name) && !item.Contains(member.Name))
                 return new("unexpectedProperty", WireJson.Path("", member.Name), "Component field is not declared.");
         return null;
     }
@@ -95,6 +95,17 @@ internal sealed class SchemaValidator(Func<string, JsonElement?> resolve, bool d
                 var referenced = Evaluate(value, target, targetDocument.Value, path, depth + 1, surfaceCatalog);
                 if (referenced.Error is not null)
                     return referenced;
+                if (parts.Length == 2 && parts[1] == "/$defs/DataBinding" &&
+                    targetDocument.Value.TryGetProperty("$id", out var targetId) &&
+                    targetId.ValueKind == JsonValueKind.String && ProtocolSchemas.IsCommonTypes(targetId.GetString()!) &&
+                    WireJson.IsObject(value) && value.TryGetProperty("@path", out var binding) &&
+                    binding.ValueKind == JsonValueKind.String)
+                {
+                    var bindingPath = binding.GetString()!;
+                    var absolutePath = bindingPath.StartsWith('/') ? bindingPath : "/" + bindingPath;
+                    if (!DataPointer.TryParse(absolutePath, out _))
+                        return new(new A2uiDiagnostic("invalidPath", WireJson.Path(path, "@path"), "Invalid path syntax or depth."));
+                }
                 result.Merge(referenced);
             }
         }

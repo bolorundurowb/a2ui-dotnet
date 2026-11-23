@@ -13,4 +13,5 @@ if (RuntimeFeature.IsDynamicCodeSupported != expectedDynamicCode)
 }
 
 CoreSmoke.Run();
+AgentSmoke.Run();
 Console.WriteLine($"Deployment smoke test passed in {args[0]} mode.");
