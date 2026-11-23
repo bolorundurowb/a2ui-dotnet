@@ -30,7 +30,7 @@ internal static class NodeCases
     {
         var catalog = LoadFixture(test, assets).GetProperty("catalog").GetString()!;
         return catalog.Contains("v0_9_1", StringComparison.Ordinal)
-            ? "The fixture uses the v0.9.1 basic catalog, which the pinned revision does not include."
+            ? "The fixture loads the v0.9.1 basic catalog, which the pinned manifest does not import and the 1.0 profile excludes."
             : "The scenario needs envelope metadata, action invocation or function recording, which the node resolver does not implement.";
     }
 
