@@ -65,6 +65,29 @@ public sealed class SurfaceSession : IDisposable
         _graphValidation = graphValidation ?? throw new ArgumentNullException(nameof(graphValidation));
     }
 
+    /// <summary>Creates an independent session initially sharing immutable committed snapshots.</summary>
+    /// <returns>A session using the same configured catalog registry and graph policy.</returns>
+    public SurfaceSession Fork()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var copy = new SurfaceSession(_catalogs, _graphValidation);
+        foreach (var surface in _surfaces)
+            copy._surfaces.Add(surface.Key, surface.Value);
+        return copy;
+    }
+
+    /// <summary>Checks the current component tree at the end of a progressive batch.</summary>
+    /// <param name="surfaceId">The surface to check. Deleted surfaces have no tree to check.</param>
+    /// <param name="cancellationToken">Cancels graph traversal.</param>
+    /// <returns>A diagnostic if the committed graph is incomplete or invalid.</returns>
+    public A2uiDiagnostic? ValidateCompleteGraph(string surfaceId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return TryGetSurface(surfaceId, out var surface)
+            ? ComponentGraph.Validate(surface!, _catalogs, GraphValidationOptions.Strict, "", new(), cancellationToken)
+            : null;
+    }
+
     /// <summary>Runs synchronously after commit. Subscribers can read the committed state.</summary>
     public event Action<SurfaceChange>? Changed;
 

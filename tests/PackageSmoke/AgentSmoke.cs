@@ -4,8 +4,58 @@ using A2UI.Core;
 
 internal static class AgentSmoke
 {
+    private static void CheckDelivery()
+    {
+        using var state = new RendererState(new CatalogRegistry());
+        var create = Decode("""{"version":"1.0","createSurface":{"surfaceId":"s"}}""");
+        var update = Decode("""{"version":"1.0","updateDataModel":{"surfaceId":"s","value":{"count":1}}}""");
+        var bad = Decode("""{"version":"1.0","updateDataModel":{"surfaceId":"unknown","value":2}}""");
+        if (state.Prepare([create, bad], out var failed) is null || failed is not null ||
+            state.TryGetSurface("s", out _) || state.PendingDelivery is not null)
+            throw new InvalidOperationException("Rejected batch committed state or messages.");
+
+        if (state.Prepare([create, update], out var candidate) is { } error)
+            throw new InvalidOperationException(error.ToString());
+        using var turn = candidate!;
+        try
+        {
+            turn.Commit(new CancellationToken(true));
+            throw new InvalidOperationException("Cancelled commit succeeded.");
+        }
+        catch (OperationCanceledException)
+        {
+            if (state.TryGetSurface("s", out _) || turn.NextMessage is not null)
+                throw new InvalidOperationException("Cancelled commit changed the mirror.");
+        }
+        turn.Commit();
+        turn.Acknowledge(create);
+        if (state.Prepare([update], out var next) is not null)
+            throw new InvalidOperationException("Could not prepare next turn.");
+        using var followup = next!;
+        try
+        {
+            followup.Commit();
+        }
+        catch (InvalidOperationException) when (ReferenceEquals(state.PendingDelivery, turn))
+        {
+            if (turn.EmittedCount != 1 || !ReferenceEquals(state.PendingDelivery.NextMessage, update))
+                throw new InvalidOperationException("Partial delivery cursor changed.");
+            turn.Acknowledge(update);
+            followup.Commit();
+            followup.Acknowledge(update);
+            if (state.PendingDelivery is null)
+                return;
+        }
+        throw new InvalidOperationException("Delivery did not resume in order.");
+
+        static WireMessage Decode(string json) =>
+            WireMessage.TryDecode(System.Text.Encoding.UTF8.GetBytes(json), WireDirection.AgentToRenderer,
+                out var message, out var diagnostic) ? message! : throw new InvalidOperationException(diagnostic?.ToString());
+    }
+
     internal static void Run()
     {
+        CheckDelivery();
         var host = new CatalogRegistry();
         using var capabilities = JsonDocument.Parse("""
             {"1.0":{"supportedCatalogIds":["https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json","unknown"]}}
