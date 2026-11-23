@@ -12,7 +12,26 @@ internal static class CoreCases
         ("conformance/core/validator_v1_0.yaml", _) when id.StartsWith("test_v10_topology_", StringComparison.Ordinal) ||
             id.StartsWith("test_v10_component_nesting_depth_", StringComparison.Ordinal) ||
             id.StartsWith("test_v10_incremental_update_", StringComparison.Ordinal) => true,
-        ("conformance/core/validator_v1_0.yaml", "test_v10_update_data_model_invalid_path_error") => true,
+        ("conformance/core/validator_v1_0.yaml",
+            "test_v10_update_data_model_invalid_path_error" or "test_v10_multiple_action_envelope_error" or
+            "test_v10_invalid_json_pointer_path_error" or
+            "test_v10_unknown_component_type" or "test_v10_unknown_component_property" or
+            "test_v10_unknown_nested_function" or "test_v10_invalid_binding_path_error" or
+            "test_v10_multi_surface_independent_roots" or "test_v10_multi_surface_missing_root_error" or
+            "test_v10_child_list_template_missing_path_error" or "test_v10_function_argument_schema_mismatch_error" or
+            "test_v10_uax31_astral_plane_identifier_accepted" or "test_v10_uax31_astral_non_identifier_component_type_error" or
+            "test_v10_validate_component_metadata_invalid_extension_key_error") => true,
+        ("conformance/core/message_processor_v1_0.yaml",
+            "test_unsupported_protocol_version_error" or "test_v10_component_without_catalog_id_on_surface_without_default_errors" or
+            "test_v10_component_without_catalog_id_errors_with_a_single_catalog" or
+            "test_v10_update_components_metadata_extension_key_must_be_identifier" or
+            "test_v10_update_components_metadata_extension_key_must_be_identifier_on_update" or
+            "test_v10_create_surface_theme_rejected_strict" or
+            "test_v10_update_components_rejects_null_at_catalog_id" or
+            "test_v10_at_catalog_id_routes_when_target_declares_optional_custom_catalog_id" or
+            "test_v10_update_components_stores_at_prefixed_component_metadata" or
+            "test_v10_at_prefixed_envelope_coexists_with_custom_component_properties" or
+            "test_v10_at_metadata_with_omitted_optional_custom_metadata_property") => true,
         ("conformance/core/message_processor_v1_0.yaml",
             "test_v10_create_surface_inline_initialization" or "test_v10_create_surface_optional_catalog_id" or
             "test_v10_create_surface_with_metadata_extensions" or "test_v10_create_surface_metadata_extension_key_must_be_identifier" or
@@ -26,11 +45,16 @@ internal static class CoreCases
             "test_permissive_mode_allows_dangling_references" or "test_v10_permissive_incremental_streaming_out_of_order_before_root" or
             "test_composition_constraints_preserved_on_partial_parent_update") => true,
         ("conformance/core/common_types.yaml",
-            "test_v10_function_response_has_exactly_one_outcome" or "test_v10_function_response_rejects_null_error") => true,
+            "test_v10_function_response_has_exactly_one_outcome" or "test_v10_function_response_rejects_null_error" or
+            "test_v10_extensions_keys_are_unicode_identifiers" or "test_v10_component_metadata_only_holds_extensions" or
+            "test_v10_component_common_rejects_null_catalog_id" or "test_v10_function_call_rejects_unknown_keys") => true,
         ("conformance/core/catalog.yaml", "test_v10_basic_catalog_to_json" or "test_v10_basic_catalog_round_trip" or
             "test_v10_catalog_from_json_rejects_ref_to_another_catalog" or
             "test_v10_catalog_from_json_rejects_absolute_uri_ref" or "test_v10_catalog_from_json_rejects_external_ref_in_function_args" or
             "test_v10_catalog_from_json_accepts_local_and_common_types_refs") => true,
+        ("conformance/core/catalog.yaml", "test_v10_catalog_from_json_component_metadata" or
+            "test_v10_catalog_from_json_component_metadata_invalid_uax31_key_error" or
+            "test_v10_component_metadata_catalog_round_trip") => true,
         _ => false
     };
 
@@ -64,13 +88,7 @@ internal static class CoreCases
                 RunCatalog(test, assets);
                 break;
             case "conformance/core/common_types.yaml":
-                foreach (var step in test.GetProperty("steps").EnumerateArray())
-                {
-                    var value = step.GetProperty("value").GetRawText();
-                    var json = Encoding.UTF8.GetBytes($$"""{"version":"1.0","agentFunctionResponse":{{value}}}""");
-                    var success = WireMessage.TryDecode(json, WireDirection.AgentToRenderer, out _, out var diagnostic);
-                    Require(success != step.TryGetProperty("expectError", out _), diagnostic?.Code ?? "Expected rejection.");
-                }
+                RunCommonTypes(test);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(file));
@@ -113,23 +131,54 @@ internal static class CoreCases
         }
     }
 
+    private static void RunCommonTypes(JsonElement test)
+    {
+        var name = test.GetProperty("name").GetString();
+        foreach (var step in test.GetProperty("steps").EnumerateArray())
+        {
+            var value = step.GetProperty("value").GetRawText();
+            var envelope = name switch
+            {
+                "test_v10_extensions_keys_are_unicode_identifiers" =>
+                    $$$$"""{"version":"1.0","createSurface":{"surfaceId":"s","metadata":{"extensions":{{{{value}}}}}}}""",
+                "test_v10_component_metadata_only_holds_extensions" or "test_v10_component_common_rejects_null_catalog_id" =>
+                    $$$$"""{"version":"1.0","updateComponents":{"surfaceId":"s","components":[{{{{value}}}}]}}""",
+                "test_v10_function_call_rejects_unknown_keys" =>
+                    $$$$"""{"version":"1.0","callAgentFunction":{"surfaceId":"s","functionCallId":"c","callFunction":{{{{value}}}}}}""",
+                _ => $$"""{"version":"1.0","agentFunctionResponse":{{value}}}"""
+            };
+            var direction = name == "test_v10_function_call_rejects_unknown_keys"
+                ? WireDirection.RendererToAgent : WireDirection.AgentToRenderer;
+            var success = WireMessage.TryDecode(Encoding.UTF8.GetBytes(envelope), direction,
+                out _, out var diagnostic);
+            Require(success != step.TryGetProperty("expectError", out _), diagnostic?.ToString() ?? "Expected rejection.");
+        }
+    }
+
     private static void RunCatalog(JsonElement test, string assets)
     {
         if (test.GetProperty("action").ValueEquals("from_json"))
         {
             var customRegistry = new CatalogRegistry();
-            var input = test.GetProperty("catalog");
-            var registered = customRegistry.TryRegister(Encoding.UTF8.GetBytes(input.GetRawText()), out var diagnostic);
+            var fromFile = test.TryGetProperty("catalogPath", out var catalogPath);
+            var definitionBytes = fromFile ? File.ReadAllBytes(Path.Combine(assets, catalogPath.GetString()!))
+                : Encoding.UTF8.GetBytes(test.GetProperty("catalog").GetRawText());
+            using var inputDocument = JsonDocument.Parse(definitionBytes);
+            var input = inputDocument.RootElement;
+            var registered = customRegistry.TryRegister(definitionBytes, out var diagnostic);
             if (test.TryGetProperty("expectError", out _))
             {
-                Require(!registered && diagnostic?.Code == "unresolvedReference",
-                    diagnostic?.ToString() ?? "Expected offline reference rejection.");
+                Require(!registered && (fromFile
+                    ? diagnostic?.Path.Contains("/metadata/extensions", StringComparison.Ordinal) == true
+                    : diagnostic?.Code == "unresolvedReference"),
+                    diagnostic?.ToString() ?? "Expected catalog registration to fail.");
                 return;
             }
             Require(registered, diagnostic?.ToString() ?? "Catalog registration failed.");
             Require(customRegistry.TryGetDefinition(input.GetProperty("catalogId").GetString()!, out var definition) &&
                 Equal(input, definition), "Catalog definition differs.");
             if (test.TryGetProperty("expect", out var expected))
+            {
                 foreach (var property in expected.EnumerateObject())
                     if (property.Name is "catalogId" or "protocolVersion" or "components" or "functions")
                         Require(definition.TryGetProperty(property.Name, out var actual) && (property.Value.ValueKind == JsonValueKind.Array
@@ -137,6 +186,15 @@ internal static class CoreCases
                                     .SequenceEqual(property.Value.EnumerateArray().Select(item => item.GetString()).Order(StringComparer.Ordinal))
                                 : Equal(property.Value, actual)),
                             $"Catalog field {property.Name} differs.");
+                if (expected.TryGetProperty("componentMetadata", out var metadata))
+                    foreach (var component in metadata.EnumerateObject())
+                    {
+                        var item = definition.GetProperty("components").GetProperty(component.Name);
+                        var hasMetadata = item.TryGetProperty("metadata", out var value);
+                        Require(component.Value.ValueKind == JsonValueKind.Null ? !hasMetadata : hasMetadata && Equal(component.Value, value),
+                            $"Component metadata for {component.Name} differs.");
+                    }
+            }
             return;
         }
         var roundTrip = test.GetProperty("action").GetString() == "round_trip";
@@ -144,8 +202,10 @@ internal static class CoreCases
         var registry = new CatalogRegistry(includeBasicCatalog: !roundTrip);
         if (roundTrip)
             Require(registry.TryRegister(bytes, out var error), error?.ToString() ?? "Registration failed.");
-        Require(registry.TryGetDefinition(CatalogRegistry.BasicCatalogId, out var catalog), "Missing Basic Catalog.");
-        Require(Equal(catalog, JsonDocument.Parse(bytes).RootElement), "Published catalog differs.");
+        using var published = JsonDocument.Parse(bytes);
+        var catalogId = published.RootElement.GetProperty("catalogId").GetString()!;
+        Require(registry.TryGetDefinition(catalogId, out var catalog), "Missing catalog.");
+        Require(Equal(catalog, published.RootElement), "Published catalog differs.");
     }
 
     private static void RunLifecycle(JsonElement test, string assets)
@@ -232,6 +292,7 @@ internal static class CoreCases
                 "unknownSurface" or "duplicateSurface" or "duplicateComponent" or "circularReference" or "missingRoot" or
                     "orphanComponent" or "danglingReference" or "invalidComposition" or "graphDepth" => "IntegrityError",
                 "invalidDataPath" => "DataError",
+                "unknownCatalog" when !validate => "CatalogError",
                 "unsupportedMessage" => null,
                 _ => "ValidationError"
             };
@@ -276,8 +337,13 @@ internal static class CoreCases
                     Require(snapshot.Components.TryGetValue(component.GetProperty("id").GetString()!, out var actual),
                         "Missing component.");
                     foreach (var property in component.EnumerateObject())
-                        Require(actual.TryGetProperty(property.Name, out var value) && Equal(value, property.Value),
+                    {
+                        var present = actual.TryGetProperty(property.Name, out var value);
+                        // The fixture uses null to represent cleared metadata in the upstream component model.
+                        var clearedMetadata = property.NameEquals("@metadata") && property.Value.ValueKind == JsonValueKind.Null;
+                        Require(clearedMetadata ? !present : present && Equal(value, property.Value),
                             $"Component field {property.Name} differs.");
+                    }
                 }
             }
         }

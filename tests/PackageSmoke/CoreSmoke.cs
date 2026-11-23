@@ -57,16 +57,46 @@ internal static class CoreSmoke
         Require(session.TryGetSurface("form", out var unchanged) && ReferenceEquals(snapshot, unchanged));
         Require(notifications == 1);
 
+        var invalidBinding = Decode("""
+            {"version":"1.0","updateComponents":{"surfaceId":"form","components":[
+              {"id":"root","component":"Text","text":{"@path":"profile/~2"}}]}}
+            """);
+        Require(session.Apply(invalidBinding) is not null);
+        Require(session.TryGetSurface("form", out unchanged) && ReferenceEquals(snapshot, unchanged));
+        Require(notifications == 1);
+
+        var mixedUpdate = Decode("""
+            {"version":"1.0","updateComponents":{"surfaceId":"form","components":[
+              {"id":"root","component":"Text","text":{"@path":"profile/name"}},
+              {"id":"label","component":"Label","@catalogId":"test:cards","text":{"@path":"/a~1b/~0c"}}]}}
+            """);
+        Require(session.Apply(mixedUpdate) is null);
+        Require(session.TryGetSurface("form", out var mixed) && mixed!.Components.Count == 2);
+        Require(notifications == 2);
+
         var update = Decode("""{"version":"1.0","updateDataModel":{"surfaceId":"form","value":null}}""");
         Require(update.Payload.GetProperty("value").ValueKind == JsonValueKind.Null);
         Require(session.Apply(update) is null);
         Require(session.TryGetSurface("form", out var reset) && reset!.DataModel.GetRawText() == "{}");
         var delete = Decode("""{"version":"1.0","deleteSurface":{"surfaceId":"form"}}""");
         Require(session.Apply(delete) is null && !session.TryGetSurface("form", out _));
-        Require(session.Apply(delete) is null && notifications == 3);
-        Require(session.Apply(create) is null && notifications == 4);
+        Require(session.Apply(delete) is null && notifications == 4);
+        Require(session.Apply(create) is null && notifications == 5);
         CheckDataWrites(session);
         CheckExpressionScope();
+
+        session.TryGetSurface("form", out var beforeCancellation);
+        var cancelled = new CancellationToken(canceled: true);
+        try
+        {
+            session.Apply(delete, cancelled);
+            throw new InvalidOperationException("Expected a cancelled surface operation.");
+        }
+        catch (OperationCanceledException error) when (error.CancellationToken == cancelled)
+        {
+            Require(session.TryGetSurface("form", out var afterCancellation) &&
+                ReferenceEquals(beforeCancellation, afterCancellation) && notifications == 7);
+        }
 
         Decode("""{"version":"1.0","callRendererFunction":{"functionCallId":"c","callFunction":{"@call":"now","catalogId":"test:cards"}}}""");
         Decode("""{"version":"1.0","agentFunctionResponse":{"functionCallId":"c","value":null}}""");
