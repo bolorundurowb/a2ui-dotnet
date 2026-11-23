@@ -27,12 +27,32 @@ public sealed class CatalogRegistry
     /// <param name="diagnostic">The reason registration failed, if any.</param>
     /// <returns>Whether the catalog was registered. Existing entries are preserved on failure.</returns>
     public bool TryRegister(ReadOnlyMemory<byte> utf8, out A2uiDiagnostic? diagnostic)
+        => TryRegister(utf8, components: null, functions: null, out diagnostic);
+
+    /// <summary>Registers a catalog with optional component and function allowlists, preserving its identity.</summary>
+    /// <param name="utf8">The complete UTF-8 catalog definition.</param>
+    /// <param name="components">Component names to keep, or null to keep all. Unrecognized names are ignored.</param>
+    /// <param name="functions">Function names to keep, or null to keep all. Unrecognized names are ignored.</param>
+    /// <param name="diagnostic">The reason registration failed, if any.</param>
+    /// <returns>Whether the catalog was registered. Existing entries are preserved on failure.</returns>
+    public bool TryRegister(ReadOnlyMemory<byte> utf8, IEnumerable<string>? components, IEnumerable<string>? functions,
+        out A2uiDiagnostic? diagnostic)
     {
         if (!WireJson.TryRead(utf8, out var definition, out diagnostic))
             return false;
         diagnostic = CheckDefinition(definition);
         if (diagnostic is not null)
             return false;
+        if (components is not null || functions is not null)
+        {
+            var selected = JsonNode.Parse(definition.GetRawText())!.AsObject();
+            SelectEntries(selected, "components", components, out _, ignoreMissing: true);
+            SelectEntries(selected, "functions", functions, out _, ignoreMissing: true);
+            definition = ProtocolSchemas.Parse(selected.ToJsonString());
+            diagnostic = CheckDefinition(definition);
+            if (diagnostic is not null)
+                return false;
+        }
         Add(definition);
         return true;
     }
@@ -81,7 +101,7 @@ public sealed class CatalogRegistry
     }
 
     private static bool SelectEntries(JsonObject definition, string group, IEnumerable<string>? names,
-        out A2uiDiagnostic? diagnostic)
+        out A2uiDiagnostic? diagnostic, bool ignoreMissing = false)
     {
         diagnostic = null;
         if (names is null)
@@ -91,6 +111,8 @@ public sealed class CatalogRegistry
         {
             if (definition[group]?[name] is not { } item)
             {
+                if (ignoreMissing)
+                    continue;
                 diagnostic = new("unknownCatalogItem", WireJson.Path(WireJson.Path("", group), name),
                     "The source catalog does not contain the selected entry.");
                 return false;
