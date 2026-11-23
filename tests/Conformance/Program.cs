@@ -50,6 +50,8 @@ foreach (var suite in new[] { "core", "agent" })
                 _ when !scaling && CoreCases.Supports(path, id) => null,
                 (_, _, "conformance/core/expressions.yaml") when id == "test_expression_parser_nested_function_call" =>
                     "The case requires the Basic Catalog formatCurrency implementation.",
+                (_, _, "conformance/core/node_resolution.yaml") when NodeCases.Supports(id) => null,
+                (_, _, "conformance/core/node_resolution.yaml") => NodeCases.ExclusionReason(test, assets),
                 _ when !scaling && AgentCases.Supports(path, test) => null,
                 (_, _, "conformance/agent/catalog_transformer.yaml") when id == "test_function_pruning_on_catalog_without_functions" =>
                     "The source catalog fixture omits its ID. Registration requires a catalog identity before pruning.",
@@ -77,6 +79,8 @@ foreach (var suite in new[] { "core", "agent" })
                         Console.WriteLine($"{id} {CoreScaling.Run(test, assets)}");
                     else if (suite == "agent")
                         AgentCases.Run(test, assets);
+                    else if (path == "conformance/core/node_resolution.yaml")
+                        NodeCases.Run(test, assets);
                     else
                         CoreCases.Run(path, test, assets);
                     results.Add(new(suite, path, id, version, "pass", null));

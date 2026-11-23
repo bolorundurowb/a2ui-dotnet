@@ -29,6 +29,33 @@ public sealed record SurfaceSnapshot(
         return DataPointer.TryParse(path, out var segments) && DataPointer.TryGet(DataModel, segments, out value);
     }
 
+
+    /// <summary>Resolves a binding in a collection occurrence's data scope.</summary>
+    /// <param name="scope">The absolute pointer to the occurrence's data.</param>
+    /// <param name="path">An absolute or relative pointer. An empty string selects the scope.</param>
+    /// <param name="value">The resolved JSON value, including explicit null.</param>
+    /// <returns>Whether the binding resolves.</returns>
+    public bool TryGetScopedData(string scope, string path, out JsonElement value)
+    {
+        value = default;
+        return TryResolveScope(scope, path, out var absolutePath) && TryGetData(absolutePath, out value);
+    }
+
+    internal static bool TryResolveScope(string scope, string path, out string absolutePath)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(path);
+
+        absolutePath = path switch
+        {
+            "" => scope,
+            _ when path.StartsWith('/') => path,
+            _ when scope == "/" => "/" + path,
+            _ => scope + "/" + path
+        };
+        return DataPointer.TryParse(scope, out _) && DataPointer.TryParse(absolutePath, out _);
+    }
+
     private static readonly JsonElement SurfaceContainer = ProtocolSchemas.Parse("""{"component":"Surface","child":"root"}""");
 }
 
@@ -101,6 +128,22 @@ public sealed class SurfaceSession : IDisposable
         return _surfaces.TryGetValue(id, out snapshot);
     }
 
+    /// <summary>Projects the current mounted component tree with data scopes.</summary>
+    /// <param name="surfaceId">The live surface identifier.</param>
+    /// <param name="maxOccurrences">The maximum number of occurrences to project.</param>
+    /// <param name="cancellationToken">Cancels traversal of the tree.</param>
+    /// <returns>The root occurrence, or null when the surface or its root is absent.</returns>
+    /// <exception cref="InvalidOperationException">The tree exceeds the occurrence limit.</exception>
+    public ComponentOccurrence? GetComponentOccurrences(string surfaceId, int maxOccurrences = 10_000,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxOccurrences);
+        return TryGetSurface(surfaceId, out var snapshot)
+            ? ComponentOccurrences.Resolve(snapshot!, _catalogs, maxOccurrences, cancellationToken)
+            : null;
+    }
+
     /// <summary>Applies a local data write using the same ordering and pointer semantics as a remote update.</summary>
     /// <param name="surfaceId">The identifier of the live surface.</param>
     /// <param name="path">The absolute pointer. Use "/" for the root.</param>
@@ -121,6 +164,25 @@ public sealed class SurfaceSession : IDisposable
         if (!WireJson.TryRead(System.Text.Encoding.UTF8.GetBytes(value.GetRawText()), out var owned, out var error))
             return error! with { Path = "/value" + error.Path };
         return UpdateData(snapshot, path, owned, "/path", cancellationToken);
+    }
+
+
+    /// <summary>Writes data through a binding in a collection occurrence's scope.</summary>
+    /// <param name="surfaceId">The identifier of the live surface.</param>
+    /// <param name="scope">The absolute pointer to the occurrence's data.</param>
+    /// <param name="path">An absolute or relative pointer. An empty string selects the scope.</param>
+    /// <param name="value">The replacement JSON value. Null deletes the target.</param>
+    /// <param name="cancellationToken">Cancels processing before commit.</param>
+    /// <returns>The rejection diagnostic, or null on success.</returns>
+    public A2uiDiagnostic? WriteScopedData(string surfaceId, string scope, string path, JsonElement value,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!SurfaceSnapshot.TryResolveScope(scope, path, out var absolutePath))
+            return new("invalidDataPath", "/path", "The data model cannot be updated at this pointer.");
+
+        return WriteData(surfaceId, absolutePath, value, cancellationToken);
     }
 
     /// <summary>Applies a surface operation and raises <see cref="Changed"/> after a successful commit.</summary>
