@@ -5,6 +5,11 @@ using A2UI.Core;
 internal static class AgentCases
 {
     internal static bool Supports(string path, JsonElement test) =>
+        path == "conformance/agent/request_processor.yaml" &&
+            test.GetProperty("args").TryGetProperty("format", out var format) && format.ValueEquals("direct_json") &&
+            !test.GetProperty("args").TryGetProperty("format_override", out _) &&
+            !test.GetProperty("args").TryGetProperty("probe_chunks", out _) && !test.TryGetProperty("then_stream", out _) &&
+            !test.GetProperty("name").GetString()!.Contains("v0_9", StringComparison.Ordinal) ||
         path == "conformance/agent/direct_json/prompt_generator.yaml" ||
         path == "conformance/agent/skill.yaml" && test.GetProperty("name").GetString()!.StartsWith("test_direct_json_", StringComparison.Ordinal) ||
         path == "conformance/agent/direct_json/compiler.yaml" ||
@@ -16,11 +21,15 @@ internal static class AgentCases
         path == "conformance/agent/catalog_provider.yaml" ||
         path == "conformance/agent/renderer_capabilities.yaml" &&
         test.GetProperty("args").GetProperty("version").ValueEquals("1.0") ||
-        path == "conformance/agent/catalog_transformer.yaml" &&
-        !test.GetProperty("name").ValueEquals("test_function_pruning_on_catalog_without_functions");
+        path == "conformance/agent/catalog_transformer.yaml";
 
     internal static void Run(JsonElement test, string assets)
     {
+        if (test.GetProperty("action").GetString() is "create_format" or "create_processor")
+        {
+            CheckProcessor(test, assets);
+            return;
+        }
         if (test.GetProperty("action").GetString() is "generate_prompt_snippet" or "monolithic_skill_equals_prompt_snippet")
         {
             CheckPrompt(test, assets);
@@ -126,7 +135,18 @@ internal static class AgentCases
                 if (transformer.TryGetProperty("function_pruning", out var functionList))
                     functions = Intersect(functions, functionList);
             }
-        Require(registry.TryRegister(File.ReadAllBytes(path), components, functions, out var error),
+        var bytes = File.ReadAllBytes(path);
+        if (item.GetProperty("catalog").ValueEquals("test_data/catalogs/catalog_without_id.json"))
+        {
+            // This transformer fixture tests an anonymous catalog. Supply its host identity for registration.
+            var source = new CatalogRegistry(false);
+            const string id = "conformance/no-functions";
+            Require(FileCatalogProvider.TryRegister(source, path, id, "1.0", out var loadError),
+                loadError?.ToString() ?? "Failed to provide a catalog identity.");
+            Require(source.TryGetDefinition(id, out var supplied), "Missing provided catalog.");
+            bytes = System.Text.Encoding.UTF8.GetBytes(supplied.GetRawText());
+        }
+        Require(registry.TryRegister(bytes, components, functions, out var error),
             error?.ToString() ?? "Registration failed.");
     }
 
@@ -156,6 +176,66 @@ internal static class AgentCases
     private static void CompareNames(IEnumerable<string> actual, JsonElement expected) =>
         Require(actual.Order(StringComparer.Ordinal).SequenceEqual(
             expected.EnumerateArray().Select(item => item.GetString()).Order(StringComparer.Ordinal)), "Catalog names differ.");
+
+    private static void CheckProcessor(JsonElement test, string assets)
+    {
+        var args = test.GetProperty("args");
+        var host = new CatalogRegistry(false);
+        foreach (var entry in args.GetProperty("catalogs").EnumerateArray())
+            Register(host, entry, assets);
+        var initial = host.CatalogIds.ToArray();
+        var examples = args.TryGetProperty("examples", out var list) ? list.EnumerateArray().Select(e =>
+            File.ReadAllText(Path.Combine(assets, "conformance", e.GetString()!))).ToArray() : null;
+        args.TryGetProperty("renderer_capabilities", out var caps);
+        var issue = test.GetProperty("action").ValueEquals("create_format")
+            ? RequestProcessor.Fixed(host, out var processor, examples)
+            : RequestProcessor.Negotiate(host, caps, false, out processor, examples);
+        if (test.TryGetProperty("expect_error", out var error))
+        {
+            Require(error.GetProperty("category").ValueEquals(issue?.Code), issue?.ToString() ?? "Expected error.");
+            return;
+        }
+        Require(issue is null && processor is not null, issue?.ToString() ?? "Processor unavailable.");
+        var expected = test.GetProperty("expect");
+        if (expected.TryGetProperty("active_catalog_ids", out var ids))
+            Require(processor!.CatalogIds.SequenceEqual(ids.EnumerateArray().Select(i => i.GetString())), "Catalog order differs.");
+        Require(host.CatalogIds.SequenceEqual(initial), "Host registry changed.");
+        foreach (var group in new[] { "prompt_snippet_contains", "prompt_snippet_absent" })
+            if (expected.TryGetProperty(group, out var names))
+                foreach (var name in names.EnumerateArray())
+                    Require(processor!.Prompt.Text.Contains(name.GetString()!, StringComparison.Ordinal) ==
+                        (group == "prompt_snippet_contains"), "Unexpected prompt content.");
+        if (expected.TryGetProperty("catalogs", out var definitions))
+            foreach (var item in definitions.EnumerateArray())
+            {
+                Require(processor!.TryGetCatalog(item.GetProperty("catalog_id").GetString()!, out var definition),
+                    "Missing selected catalog.");
+                CheckDefinition(definition, item);
+            }
+        using var state = processor!.CreateSession();
+        using var other = processor.CreateSession();
+        Require(!ReferenceEquals(state, other), "Parser sessions must be independent.");
+        if (test.TryGetProperty("then_parse", out var parse))
+        {
+            var diagnostic = DirectJson.ParseResponse(parse.GetProperty("input").GetString()!, state, out var parts, out var turn);
+            using var transaction = turn;
+            if (parse.TryGetProperty("expect_error", out var failure))
+                Require(failure.GetProperty("category").ValueEquals(diagnostic?.Code), "Expected parse failure.");
+            else
+            {
+                Require(diagnostic is null, diagnostic?.ToString() ?? "Parse failed.");
+                var wanted = parse.GetProperty("expect");
+                Require(parts.Count == wanted.GetArrayLength(), "Part count differs.");
+                for (var i = 0; i < parts.Count; i++)
+                    if (wanted[i].TryGetProperty("text", out var text))
+                        Require(text.ValueEquals(parts[i].Text), "Text differs.");
+                    else
+                        Require(System.Text.Json.Nodes.JsonNode.DeepEquals(
+                            System.Text.Json.Nodes.JsonNode.Parse(DirectJson.Decompile(parts[i].Messages!)),
+                            System.Text.Json.Nodes.JsonNode.Parse(wanted[i].GetProperty("a2ui").GetRawText())), "Payload differs.");
+            }
+        }
+    }
 
     private static void CheckPrompt(JsonElement test, string assets)
     {
