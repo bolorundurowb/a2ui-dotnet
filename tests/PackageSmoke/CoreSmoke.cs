@@ -85,6 +85,7 @@ internal static class CoreSmoke
         Require(session.Apply(create) is null && notifications == 5);
         CheckDataWrites(session);
         CheckExpressionScope();
+        CheckNodeResolver(registry);
 
         session.TryGetSurface("form", out var beforeCancellation);
         var cancelled = new CancellationToken(canceled: true);
@@ -154,6 +155,33 @@ internal static class CoreSmoke
                 Require(arguments["index"].GetProperty("label").ValueEquals("item"));
             return arguments["value"];
         }
+    }
+
+    private static void CheckNodeResolver(CatalogRegistry registry)
+    {
+        using var session = new SurfaceSession(registry);
+        using var resolver = new NodeResolver(session, registry, "nodes");
+        var created = new List<string>();
+        var changes = 0;
+        resolver.NodeCreated += node => created.Add(node.Position);
+        resolver.PropsChanged += _ => changes++;
+        var create = Decode($$$"""
+            {"version":"1.0","createSurface":{"surfaceId":"nodes","catalogId":"{{{CatalogRegistry.BasicCatalogId}}}",
+              "dataModel":{"items":[{"name":"Ada"},{"name":"Lin"}]},
+              "components":[{"id":"root","component":"Column","children":{"componentId":"name","path":"/items"}},
+                {"id":"name","component":"Text","text":{"@path":"name"}}]}}
+            """);
+        Require(session.Apply(create) is null);
+        Require(created.SequenceEqual(new[] { "root", "root/children/0", "root/children/1" }));
+
+        var first = resolver.Nodes[1];
+        using var edit = JsonDocument.Parse("\"Grace\"");
+        Require(resolver.Write(first, "text", edit.RootElement) is null);
+        Require(changes == 1 && ReferenceEquals(first, resolver.Nodes[1]));
+        Require(resolver.Write(resolver.Nodes[0], "children", edit.RootElement)?.Code == "notWritable");
+
+        Require(session.Apply(Decode("""{"version":"1.0","deleteSurface":{"surfaceId":"nodes"}}""")) is null);
+        Require(resolver.Nodes.Count == 0);
     }
 
     private static void CheckOccurrences(CatalogRegistry registry)
