@@ -49,6 +49,8 @@ foreach (var suite in new[] { "core", "agent" })
                 (_, _, "conformance/core/expressions.yaml") when id == "test_expression_parser_nested_function_call" =>
                     "The case requires the Basic Catalog formatCurrency implementation.",
                 _ when !scaling && AgentCases.Supports(path, test) => null,
+                (_, _, "conformance/agent/catalog_transformer.yaml") when id == "test_function_pruning_on_catalog_without_functions" =>
+                    "The source catalog fixture omits its ID. Registration requires a catalog identity before pruning.",
                 (_, _, "conformance/core/catalog.yaml") when id == "test_v10_catalog_from_json_v1_0_attributes" =>
                     "The fixture uses a function entry without type and properties. The pinned catalog schema requires both.",
                 _ when ReadString(test, "action") is "agent_to_renderer_schema" or "common_types_schema" => "Generated schema parity is outside the current profile.",

@@ -1,0 +1,47 @@
+name: Upstream conformance
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            11.0.x
+      - name: Run the pinned suites and generate the badge
+        shell: pwsh
+        run: |
+          $assets = ./scripts/Get-UpstreamBaseline.ps1
+          dotnet build tests/Conformance -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet run --project tests/Conformance -c Release --no-build -- $assets artifacts/correctness.json
+          $correctnessExit = $LASTEXITCODE
+          dotnet run --project tests/Conformance -c Release --no-build -- $assets artifacts/scaling.json --scaling
+          $scalingExit = $LASTEXITCODE
+          if ($correctnessExit -gt 1 -or $scalingExit -gt 1) { throw 'The conformance runner failed.' }
+          ./scripts/New-ConformanceBadge.ps1 artifacts/correctness.json artifacts/scaling.json artifacts/conformance-badge.svg |
+            Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: conformance-results
+          path: |
+            artifacts/correctness.json
+            artifacts/scaling.json
+            artifacts/conformance-badge.svg
+          if-no-files-found: error
