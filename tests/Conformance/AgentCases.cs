@@ -5,7 +5,11 @@ using A2UI.Core;
 internal static class AgentCases
 {
     internal static bool Supports(string path, JsonElement test) =>
-        path == "conformance/agent/renderer_state.yaml" && test.GetProperty("turns")[0].TryGetProperty("payload", out _) ||
+        path == "conformance/agent/direct_json/compiler.yaml" ||
+        path == "conformance/agent/direct_json/decompiler.yaml" && !test.GetProperty("name").ValueEquals("test_decompile_json_catalog_qualified_components") ||
+        path == "conformance/agent/direct_json/response_parser.yaml" ||
+        path == "conformance/agent/renderer_state.yaml" && (test.GetProperty("turns")[0].TryGetProperty("payload", out _) ||
+            test.GetProperty("turns")[0].GetProperty("format").ValueEquals("direct_json")) ||
         path == "conformance/agent/catalog_resolution.yaml" ||
         path == "conformance/agent/catalog_provider.yaml" ||
         path == "conformance/agent/renderer_capabilities.yaml" &&
@@ -18,6 +22,16 @@ internal static class AgentCases
         if (test.GetProperty("action").ValueEquals("renderer_state_turns"))
         {
             RunRendererState(test, assets);
+            return;
+        }
+        if (test.GetProperty("action").GetString() is "unwrap" or "wrap" or "has_format_content")
+        {
+            CheckFraming(test);
+            return;
+        }
+        if (test.GetProperty("action").GetString() is "compile" or "decompile" or "parse_response")
+        {
+            CheckCompiler(test, assets);
             return;
         }
         var args = test.GetProperty("args");
@@ -136,6 +150,104 @@ internal static class AgentCases
         Require(actual.Order(StringComparer.Ordinal).SequenceEqual(
             expected.EnumerateArray().Select(item => item.GetString()).Order(StringComparer.Ordinal)), "Catalog names differ.");
 
+    private static void CheckCompiler(JsonElement test, string assets)
+    {
+        var args = test.GetProperty("args");
+        var registry = new CatalogRegistry(false);
+        var files = args.TryGetProperty("catalog", out var catalog)
+            ? new[] { catalog.GetString()! } : args.GetProperty("catalogs").EnumerateArray().Select(e => e.GetString()!);
+        foreach (var file in files)
+        {
+            var bytes = File.ReadAllBytes(Path.Combine(assets, "conformance", file));
+            if (file == "test_data/catalogs/agent_functions_catalog_v1_0.json")
+            {
+                // The empty component set omits the required union in this pinned fixture.
+                var doc = System.Text.Json.Nodes.JsonNode.Parse(bytes)!;
+                doc["$defs"]!["anyComponent"] = false;
+                bytes = System.Text.Encoding.UTF8.GetBytes(doc.ToJsonString());
+            }
+            Require(registry.TryRegister(bytes, out var error), error?.ToString() ?? "Catalog registration failed.");
+        }
+        if (test.GetProperty("action").ValueEquals("parse_response"))
+        {
+            using var state = new RendererState(registry);
+            var issue = DirectJson.ParseResponse(test.GetProperty("input").GetString()!, state, out var parts, out var turn,
+                !args.TryGetProperty("wrapped", out var wrap) || wrap.GetBoolean());
+            using var transaction = turn;
+            if (test.TryGetProperty("expect_error", out var error))
+                Require(error.GetProperty("category").ValueEquals(issue?.Code), issue?.ToString() ?? "Expected an error.");
+            else
+            {
+                Require(issue is null && transaction is not null, issue?.ToString() ?? "Missing transaction.");
+                var expectedParts = test.GetProperty("expect");
+                Require(parts.Count == expectedParts.GetArrayLength(), "Wrong part count.");
+                for (var i = 0; i < parts.Count; i++)
+                {
+                    if (expectedParts[i].TryGetProperty("text", out var text))
+                        Require(text.ValueEquals(parts[i].Text), "Text differs.");
+                    else
+                        Require(System.Text.Json.Nodes.JsonNode.DeepEquals(
+                            System.Text.Json.Nodes.JsonNode.Parse(expectedParts[i].GetProperty("a2ui").GetRawText()),
+                            System.Text.Json.Nodes.JsonNode.Parse(DirectJson.Decompile(parts[i].Messages!))), "Messages differ.");
+                }
+            }
+            return;
+        }
+        var decompile = test.GetProperty("action").ValueEquals("decompile");
+        var input = decompile ? test.GetProperty("messages").GetRawText() : test.GetProperty("input").GetString()!;
+        var diagnostic = DirectJson.Compile(input, registry, out var messages);
+        if (test.TryGetProperty("expect_error", out var expectedError))
+        {
+            Require(diagnostic?.Code == expectedError.GetProperty("category").GetString(),
+                diagnostic?.ToString() ?? "Expected a failure.");
+            if (expectedError.TryGetProperty("message", out var fragment))
+                Require(diagnostic!.ToString().Contains(fragment.GetString()!, StringComparison.OrdinalIgnoreCase),
+                    diagnostic.ToString());
+            return;
+        }
+        Require(diagnostic is null, diagnostic?.ToString() ?? "Compilation failed.");
+        var output = DirectJson.Decompile(messages);
+        if (test.TryGetProperty("expect_contains", out var fragments))
+            foreach (var fragment in fragments.EnumerateArray())
+                Require(output.Contains(fragment.GetString()!, StringComparison.Ordinal), fragment.GetString()!);
+        Require(DirectJson.Compile(output, registry, out var roundTrip) is null &&
+            DirectJson.Decompile(roundTrip) == output, "Round trip changed messages.");
+        var expected = test.GetProperty(decompile ? "messages" : "expect");
+        Require(System.Text.Json.Nodes.JsonNode.DeepEquals(System.Text.Json.Nodes.JsonNode.Parse(output),
+            System.Text.Json.Nodes.JsonNode.Parse(expected.GetRawText())), "Compiled messages differ.");
+    }
+
+    private static void CheckFraming(JsonElement test)
+    {
+        if (test.GetProperty("action").ValueEquals("wrap"))
+        {
+            var input = Parts(test.GetProperty("parts"));
+            var result = DirectJson.Wrap(input);
+            if (test.TryGetProperty("expect_output", out var expected))
+                Require(expected.ValueEquals(result), "Wrapped response differs.");
+            if (test.TryGetProperty("expect_contains", out var fragments))
+                foreach (var fragment in fragments.EnumerateArray())
+                    Require(result.Contains(fragment.GetString()!, StringComparison.Ordinal), "Missing wrapped content.");
+            if (test.TryGetProperty("expect_round_trip", out var roundTrip) && roundTrip.GetBoolean())
+                Require(input.SequenceEqual(DirectJson.Unwrap(result)), "Round trip changed response parts.");
+            return;
+        }
+        var parts = DirectJson.Unwrap(test.GetProperty("input").GetString()!);
+        if (test.GetProperty("action").ValueEquals("unwrap"))
+            Require(parts.SequenceEqual(Parts(test.GetProperty("expect"))), "Unwrapped parts differ.");
+        else
+        {
+            var complete = test.GetProperty("args").TryGetProperty("complete", out var flag) && flag.GetBoolean();
+            Require(parts.Any(p => p.IsPayload && (!complete || p.IsFinal)) == test.GetProperty("expect").GetBoolean(),
+                "Format content detection differs.");
+        }
+
+        static DirectJsonPart[] Parts(JsonElement array) => array.EnumerateArray().Select(item =>
+            item.TryGetProperty("text", out var text) ? new DirectJsonPart(text.GetString()!) :
+                new DirectJsonPart(item.GetProperty("a2ui_raw").GetString()!, true,
+                    !item.TryGetProperty("is_final", out var final) || final.GetBoolean())).ToArray();
+    }
+
     private static void RunRendererState(JsonElement test, string assets)
     {
         var registry = new CatalogRegistry(false);
@@ -147,18 +259,30 @@ internal static class AgentCases
         foreach (var step in test.GetProperty("turns").EnumerateArray())
         {
             var messages = new List<WireMessage>();
-            foreach (var envelope in step.GetProperty("payload").EnumerateArray())
+            A2uiDiagnostic? diagnostic;
+            RendererTurn? candidate;
+            if (step.TryGetProperty("payload", out var payload))
+            {
+            foreach (var envelope in payload.EnumerateArray())
             {
                 Require(WireMessage.TryDecode(System.Text.Encoding.UTF8.GetBytes(envelope.GetRawText()),
                     WireDirection.AgentToRenderer, out var message, out var decode), decode?.ToString() ?? "Decode failed.");
                 messages.Add(message!);
             }
 
-            var diagnostic = state.Prepare(messages, out var candidate);
+                diagnostic = state.Prepare(messages, out candidate);
+            }
+            else
+            {
+                diagnostic = DirectJson.ParseResponse(step.GetProperty("response").GetString()!, state, out var parts, out candidate);
+                foreach (var part in parts)
+                    if (part.Messages is not null)
+                        messages.AddRange(part.Messages);
+            }
             if (step.TryGetProperty("expect_error", out var expectedError))
             {
                 Require(candidate is null && diagnostic is not null &&
-                    diagnostic.Message.Contains(expectedError.GetProperty("message").GetString()!, StringComparison.Ordinal),
+                    (!expectedError.TryGetProperty("message", out var fragment) || diagnostic.Message.Contains(fragment.GetString()!, StringComparison.Ordinal)),
                     diagnostic?.ToString() ?? "Expected failed validation.");
                 continue;
             }
