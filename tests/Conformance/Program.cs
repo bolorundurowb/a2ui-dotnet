@@ -64,9 +64,19 @@ foreach (var suite in new[] { "core", "agent" })
                     "test_v10_component_from_named_catalog_with_closed_schema_accepted" or
                     "test_v10_component_update_without_catalog_id_on_surface_without_default_errors" or
                     "test_v10_component_update_without_catalog_id_uses_surface_default" or
-                    "test_v10_component_naming_catalog_is_checked_against_that_catalog" =>
+                    "test_v10_component_naming_catalog_is_checked_against_that_catalog" or
+                    "test_v10_update_components_mismatched_catalog_protocol_version_error" =>
                     "The fixture routes a component using bare catalogId. The pinned protocol uses @catalogId for component routing.",
-                _ when ReadString(test, "action") is "agent_to_renderer_schema" or "common_types_schema" => "Generated schema parity is outside the current profile.",
+                (_, _, "conformance/core/message_processor_v1_0.yaml") when id is
+                    "test_v10_update_components_stores_component_metadata" or "test_v10_update_components_replaces_component_metadata" or
+                    "test_v10_update_components_omitted_metadata_clears_component_metadata" or
+                    "test_v10_inline_catalog_id_and_metadata_standard_only_beside_inline_id" =>
+                    "The fixture sends component metadata as bare metadata. The pinned protocol uses @metadata.",
+                (_, _, "conformance/core/reserved_keys.yaml") when id is
+                    "test_escaped_doubled_at_unescaping" or "test_escaped_doubled_at_metadata_unescaping" =>
+                    "The fixture expects @@ keys to be unescaped when the value is evaluated. Core keeps wire values unchanged and resolved nodes do not unescape yet (#12).",
+                (_, _, "conformance/core/error_responses.yaml") =>
+                    "The case expects a renderer error message with a protocol error code. Mapping diagnostics to those messages belongs to structured errors (#14).",
                 _ => "Public API or fixture adapter is pending."
             };
             if (reason is not null)
