@@ -79,9 +79,16 @@ public sealed class ActionDispatcher
                 userMessage = resolved.GetString();
         }
 
-        var bytes = Write(surface.Id, sourceComponentId, name.GetString()!, userMessage, context, metadata);
+        return Compose(surface.Id, sourceComponentId, name.GetString()!, userMessage, context, metadata);
+    }
+
+    // Builds the action message once every context entry and the user message are resolved.
+    internal ActionResult Compose(string surfaceId, string sourceComponentId, string name, string? userMessage,
+        List<(string Key, JsonElement Value)> context, JsonElement? metadata)
+    {
+        var bytes = Write(surfaceId, sourceComponentId, name, userMessage, context, metadata);
         if (!WireMessage.TryDecode(bytes, WireDirection.RendererToAgent, out var message, out var rejection))
-            return new(null, RendererError.FromDiagnostic(rejection!, surface.Id));
+            return new(null, RendererError.FromDiagnostic(rejection!, surfaceId));
         return new(message, null);
     }
 
@@ -126,7 +133,7 @@ public sealed class ActionDispatcher
     // A function that cannot run is a refusal. Both the catalog and the expression errors keep their own wire codes.
     private static ActionResult Failed(SurfaceSnapshot surface, A2uiDiagnostic problem, string prefix)
     {
-        var diagnostic = problem.Code == "CatalogError"
+        var diagnostic = problem.Code is "CatalogError" or "ExecutionError"
             ? problem with { Message = prefix + problem.Message }
             : new A2uiDiagnostic("ExpressionError", problem.Path, prefix + problem.Message);
         return new(null, RendererError.FromDiagnostic(diagnostic, surface.Id));

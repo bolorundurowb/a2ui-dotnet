@@ -188,6 +188,43 @@ public sealed class CatalogRegistry
         return true;
     }
 
+    // Applies the schema defaults of a function's arguments, then checks them against the schema.
+    internal A2uiDiagnostic? ParseArguments(string catalogId, string name, JsonElement args, out JsonElement parsed)
+    {
+        parsed = args;
+        if (!_catalogs.TryGetValue(catalogId, out var catalog) ||
+            !catalog.Definition.TryGetProperty("functions", out var functions) ||
+            !functions.TryGetProperty(name, out var declaration) ||
+            !declaration.TryGetProperty("properties", out var members) || !members.TryGetProperty("args", out var schema))
+            return null;
+
+        var node = JsonNode.Parse(args.GetRawText());
+        ApplyDefaults(node, schema);
+        parsed = ProtocolSchemas.Parse(node?.ToJsonString() ?? "null");
+        return catalog.Validator.Validate(parsed, schema, catalog.Definition);
+    }
+
+    private static void ApplyDefaults(JsonNode? instance, JsonElement schema)
+    {
+        if (schema.ValueKind != JsonValueKind.Object)
+            return;
+        if (instance is JsonObject members && schema.TryGetProperty("properties", out var properties) &&
+            properties.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in properties.EnumerateObject())
+            {
+                if (members.TryGetPropertyValue(property.Name, out var present))
+                    ApplyDefaults(present, property.Value);
+                else if (property.Value.ValueKind == JsonValueKind.Object && property.Value.TryGetProperty("default", out var fallback))
+                    members[property.Name] = JsonNode.Parse(fallback.GetRawText());
+            }
+        }
+        else if (instance is JsonArray items && schema.TryGetProperty("items", out var itemSchema))
+        {
+            foreach (var item in items)
+                ApplyDefaults(item, itemSchema);
+        }
+    }
     /// <summary>Validates a component against its explicit catalog or the surface default.</summary>
     /// <param name="component">The wire-level component object.</param>
     /// <param name="defaultCatalogId">The surface catalog, or null when the surface has none.</param>

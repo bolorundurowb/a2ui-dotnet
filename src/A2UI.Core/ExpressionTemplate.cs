@@ -35,7 +35,7 @@ public static class ExpressionTemplate
     }
 
     internal static bool TryEvaluateWith(string template, JsonElement dataModel, JsonElement scope, string? catalogId,
-        FunctionInvoker? invoke, out string? result, out A2uiDiagnostic? diagnostic)
+        FunctionInvoker? invoke, out string? result, out A2uiDiagnostic? diagnostic, Action<A2uiDiagnostic>? reportPartError = null)
     {
         result = null;
         if (!TryParse(template, out var parts, out diagnostic))
@@ -46,7 +46,13 @@ public static class ExpressionTemplate
         foreach (var part in parts.EnumerateArray())
         {
             if (!evaluator.TryResolve(part, out var value, out diagnostic))
-                return false;
+            {
+                if (reportPartError is null)
+                    return false;
+                reportPartError(diagnostic!);
+                diagnostic = null;
+                continue;
+            }
             var display = value.ValueKind switch
             {
                 JsonValueKind.Undefined or JsonValueKind.Null => "",
