@@ -129,6 +129,51 @@ internal static class CoreSmoke
         Require(WireMessage.TryDecode(output.WrittenMemory, WireDirection.AgentToRenderer, out var copy, out var roundTrip) &&
             copy!.Envelope.GetProperty("createSurface").GetProperty("dataModel").GetProperty("number").GetRawText() ==
             "9007199254740993", roundTrip);
+        CheckWireFidelity();
+    }
+
+    // Pins how the codec treats number text, absent members, explicit null and input ownership. Decode clears the
+    // input buffer, so every read below also proves that the message does not borrow from its input.
+    private static void CheckWireFidelity()
+    {
+        string[] numbers = ["1.0", "1.00E+2", "-0.0", "123456789012345678901234567890.123456789", "1e400", "0.1"];
+        var decoded = Decode("""{"version":"1.0","updateDataModel":{"surfaceId":"s","value":{"numbers":[""" +
+            string.Join(",", numbers) + """]}}}""");
+        Require(RawNumbers(decoded).SequenceEqual(numbers));
+        Require(RawNumbers(RoundTrip(decoded)).SequenceEqual(numbers));
+
+        // The protocol requires updateDataModel.value and uses an explicit null to delete, so absence is an error.
+        var explicitNull = Decode("""{"version":"1.0","updateDataModel":{"surfaceId":"s","path":"/a","value":null}}""");
+        foreach (var message in new[] { explicitNull, RoundTrip(explicitNull) })
+            Require(message.Payload.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Null);
+        Require(!WireMessage.TryDecode("""{"version":"1.0","updateDataModel":{"surfaceId":"s","path":"/a"}}"""u8.ToArray(),
+            WireDirection.AgentToRenderer, out _, out var absent) && absent?.Path == "/updateDataModel/value", absent);
+
+        var registry = new CatalogRegistry();
+        using var session = new SurfaceSession(registry);
+        Require(session.Apply(Decode($$$$"""
+            {"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"{{{{CatalogRegistry.BasicCatalogId}}}}","dataModel":{"stored":null}}}
+            """)) is null);
+        Require(session.TryGetSurface("s", out var surface) && surface is not null);
+        Require(surface!.TryGetData("/stored", out var stored) && stored.ValueKind == JsonValueKind.Null);
+        Require(!surface.TryGetData("/unresolved", out _));
+
+        var unresolved = Decode("""{"version":"1.0","createSurface":{"surfaceId":"other","catalogId":"urn:missing"}}""");
+        Require(session.Apply(unresolved)?.Code == "unknownCatalog");
+    }
+
+    private static IEnumerable<string> RawNumbers(WireMessage message) =>
+        message.Payload.GetProperty("value").GetProperty("numbers").EnumerateArray().Select(number => number.GetRawText());
+
+    private static WireMessage RoundTrip(WireMessage message)
+    {
+        var output = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(output))
+            message.WriteTo(writer);
+        var buffer = output.WrittenMemory.ToArray();
+        Require(WireMessage.TryDecode(buffer, message.Direction, out var copy, out var error), error);
+        Array.Clear(buffer);
+        return copy!;
     }
 
     private static void CheckExpressionScope()

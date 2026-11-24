@@ -127,7 +127,7 @@ public static partial class DirectJson
         return false;
     }
 
-    private static string Clean(string raw)
+    internal static string Clean(string raw)
     {
         var text = raw.Trim();
         if (text.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
