@@ -23,9 +23,35 @@ Wire decode checks the message independently of surface state. Catalog-specific
 component fields and function arguments are validated once the relevant catalog
 is known. A component selects its explicit catalog before the surface default.
 Nested calls select their own catalog from their explicit ID or the surface
-default. JSON number tokens keep their original precision and representation.
-Optional absent members remain absent, explicit JSON null remains null, and
-duplicate members are rejected.
+default.
+
+## Wire fidelity
+
+A decoded message owns its JSON. The decoder parses the input, rejects it or
+clones the root, and keeps nothing from the caller's buffer, so the buffer can
+be cleared or returned to a pool as soon as decoding returns. The package smoke
+check clears each input buffer before reading the message.
+
+- **Numbers.** Number tokens keep their original text, including `1.0`,
+  `1.00E+2`, `-0.0`, values beyond double precision and values beyond double
+  range such as `1e400`. Core does not convert them to `double` unless a schema
+  keyword needs a numeric comparison.
+- **Duplicate members.** A duplicate member name at any depth rejects the whole
+  value with a `duplicateProperty` diagnostic. Its path is the JSON Pointer of
+  the second occurrence.
+- **Absent and null.** An absent optional member stays absent and an explicit
+  `null` stays `null`, in decoded messages and after encoding. The protocol
+  makes `updateDataModel.value` required and uses an explicit `null` to delete
+  a value, so an omitted `value` is a `missingProperty` error.
+- **Unresolved.** A reference that has no target is neither absent nor null.
+  An unknown catalog is `unknownCatalog`, an unregistered schema reference is
+  `unresolvedReference`, and a data pointer with no value reads as not found.
+  A stored `null` reads as found with a null value.
+- **Diagnostics.** Each failure has a category in its `Code` and the JSON
+  Pointer of the offending value, with `~` and `/` escaped in member names.
+
+Wire decoding applies to one complete JSON value. SSE events, JSON Lines and
+model chunk framing belong to the host or to `A2UI.Agent`.
 
 ## Comparison on .NET 8
 
@@ -57,6 +83,27 @@ properties. The validator fixture `test_v10_uax31_invalid_identifier_error`
 requires identifier syntax for component IDs, while the pinned
 `common_types.json#/$defs/ComponentId` specifies a string. The conformance
 report records these differences at the pinned revision above.
+
+The processor fixtures `test_v10_update_components_stores_component_metadata`,
+`test_v10_update_components_replaces_component_metadata`,
+`test_v10_update_components_omitted_metadata_clears_component_metadata` and
+`test_v10_inline_catalog_id_and_metadata_standard_only_beside_inline_id` send
+component metadata as bare `metadata`. The pinned `ComponentCommon` declares
+`@metadata`, so Core reads only that member and treats a bare `metadata` as a
+catalog-defined property.
+
+The `reserved_keys` fixtures `test_escaped_doubled_at_unescaping` and
+`test_escaped_doubled_at_metadata_unescaping` expect `@@path` to be stored as
+`@path`. Core keeps wire values unchanged and the unescaping is left to
+resolved nodes ([#12](https://github.com/bolorundurowb/a2ui-dotnet/issues/12)).
+
+The `validate_common_type` fixtures for `Surface`, `DynamicValue` and
+`IndexSystemFunction` run through a probe catalog with one component property
+for the definition and a `now` function. A `FunctionCall` is checked against the
+catalog's function list, so a call is only valid when the catalog declares it.
+The two schema parity fixtures compare the embedded pinned documents with the
+specification files. Core serves those documents instead of generating them
+from SDK models.
 
 Derived catalogs can select entries
 from a registered source. The upstream `derive_source_catalog_v1_0.json`
