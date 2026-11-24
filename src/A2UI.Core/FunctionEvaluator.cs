@@ -204,10 +204,11 @@ public sealed class FunctionEvaluator
 
     // Runs a call whose arguments are already resolved. The caller has classified it as local.
     internal bool TryInvoke(SurfaceSnapshot surface, string dataPath, string catalogId, string name,
-        IReadOnlyDictionary<string, JsonElement> args, bool userInitiated, out JsonElement value, out A2uiDiagnostic? diagnostic)
+        IReadOnlyDictionary<string, JsonElement> args, bool userInitiated, out JsonElement value, out A2uiDiagnostic? diagnostic,
+        Action<A2uiDiagnostic>? reportPartError = null)
     {
         if (!_hostFunctions.TryGetValue((catalogId, name), out var implementation))
-            return BasicFunctions.TryInvoke(name, args, CreateContext(surface, dataPath, catalogId, userInitiated),
+            return BasicFunctions.TryInvoke(name, args, CreateContext(surface, dataPath, catalogId, userInitiated, reportPartError),
                 out value, out diagnostic);
 
         try
@@ -223,13 +224,15 @@ public sealed class FunctionEvaluator
             return false;
         }
     }
-    private FunctionContext CreateContext(SurfaceSnapshot surface, string dataPath, string catalogId, bool userInitiated)
+    private FunctionContext CreateContext(SurfaceSnapshot surface, string dataPath, string catalogId, bool userInitiated,
+        Action<A2uiDiagnostic>? reportPartError)
     {
         surface.TryGetScopedData(dataPath, "", out var scope);
-        return new(surface.DataModel, scope, catalogId, TemplateInvoker(surface, dataPath, userInitiated), _openUrl);
+        return new(surface.DataModel, scope, catalogId, TemplateInvoker(surface, dataPath, userInitiated, reportPartError), _openUrl, reportPartError);
     }
 
-    private FunctionInvoker TemplateInvoker(SurfaceSnapshot surface, string dataPath, bool userInitiated) =>
+    private FunctionInvoker TemplateInvoker(SurfaceSnapshot surface, string dataPath, bool userInitiated,
+        Action<A2uiDiagnostic>? reportPartError) =>
         (string? catalogId, string name, IReadOnlyDictionary<string, JsonElement> args, out JsonElement value,
             out A2uiDiagnostic? diagnostic) =>
         {
@@ -240,7 +243,7 @@ public sealed class FunctionEvaluator
                     : Fail($"System function '{name}' is not defined.", out diagnostic);
             if (!TryRoute(surface.Id, catalogId, name, userInitiated, out diagnostic))
                 return false;
-            return TryInvoke(surface, dataPath, catalogId!, name, args, userInitiated, out value, out diagnostic);
+            return TryInvoke(surface, dataPath, catalogId!, name, args, userInitiated, out value, out diagnostic, reportPartError);
         };
 
     private bool TryArguments(SurfaceSnapshot surface, string dataPath, JsonElement call, bool userInitiated, int depth,

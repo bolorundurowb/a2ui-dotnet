@@ -10,9 +10,10 @@ namespace A2UI.Core;
 /// <param name="Scope">The current collection item, or an undefined value at the root.</param>
 /// <param name="CatalogId">The catalog the enclosing call runs in, inherited by calls inside formatString templates.</param>
 /// <param name="Invoke">Runs a function call that appears inside a formatString template.</param>
+/// <param name="ReportPartError">Reports an interpolation failure while preserving the rest of the text.</param>
 /// <param name="OpenUrl">The host handler for openUrl, or null when the host opens no URLs.</param>
 internal sealed record FunctionContext(JsonElement DataModel, JsonElement Scope, string? CatalogId,
-    FunctionInvoker Invoke, Action<Uri>? OpenUrl);
+    FunctionInvoker Invoke, Action<Uri>? OpenUrl, Action<A2uiDiagnostic>? ReportPartError = null);
 
 /// <summary>Runs one function call with already resolved arguments.</summary>
 internal delegate bool FunctionInvoker(string? catalogId, string name, IReadOnlyDictionary<string, JsonElement> args,
@@ -207,7 +208,7 @@ public static class BasicFunctions
         if (template.ValueKind != JsonValueKind.String)
             return Ok(FunctionValues.String(FunctionValues.ToText(template)));
         return ExpressionTemplate.TryEvaluateWith(template.GetString()!, context.DataModel, context.Scope, context.CatalogId,
-            context.Invoke, out var text, out var diagnostic)
+            context.Invoke, out var text, out var diagnostic, context.ReportPartError)
             ? Ok(FunctionValues.String(text!))
             : new(default, diagnostic);
     }

@@ -19,15 +19,8 @@ internal static class RpcCases
             "The fixture lets an agent call a function that requires user activation. The pinned catalog schema allows that flag only on rendererOnly functions, so the catalog cannot be registered.",
         (RpcFile, "test_rpc_call_renderer_function_protocol_version_mismatch") =>
             "The registry accepts only 1.0 catalogs, so the 0.9 catalog in the fixture cannot be registered.",
-        (RpcFile, "test_rpc_ui_action_missing_local_function_fallback_to_agent") =>
-            "The fixture expects the value of an action's function call as a result. An action has no result value.",
-        (RpcFile, "test_rpc_ui_action_agent_error_halts_pipeline") =>
-            "The fixture declares local functions with setData effects. The evaluator has no effect functions.",
         (RoutingFile, "test_agent_routing_non_json_argument_fails_locally") =>
             "A JSON value cannot hold NaN or an infinity, so the arguments of the fixture have no representation here.",
-        (RoutingFile, "test_agent_routing_template_part_never_routes" or
-            "test_agent_routing_template_part_does_not_fall_back_to_default_catalog") =>
-            "The fixture expects formatString to render a failed template part as empty and report the error. formatString fails the whole call.",
         _ => null
     };
 
@@ -46,6 +39,8 @@ internal static class RpcCases
         var args = test.GetProperty("args");
         if (args.TryGetProperty("uiBindingScenario", out var scenario))
             RunUiBinding(test, scenario);
+        else if (args.TryGetProperty("uiActionFallbackScenario", out var action))
+            RunUiAction(test.GetProperty("expect"), action);
         else if (args.TryGetProperty("outboundCall", out _))
             RunAgentCall(test, args);
         else if (args.GetProperty("message").TryGetProperty("agentFunctionResponse", out var response))
@@ -295,6 +290,80 @@ internal static class RpcCases
             Require(errors[0].Code == surfaceError.GetProperty("code").GetString(), $"Code {errors[0].Code} differs.");
             Require(errors[0].FunctionCallId == outbound.GetProperty("functionCallId").GetString(), "The error names another call.");
         }
+    }
+
+    private static void RunUiAction(JsonElement expectation, JsonElement scenario)
+    {
+        var surfaceId = scenario.GetProperty("surfaceId").GetString()!;
+        var catalogId = scenario.GetProperty("catalogId").GetString()!;
+        var registry = new CatalogRegistry(includeBasicCatalog: false);
+        var functions = new JsonObject();
+        if (scenario.TryGetProperty("localFunctions", out var local))
+            foreach (var definition in local.EnumerateObject())
+                functions[definition.Name] = Declaration(definition.Name, definition.Value);
+        Register(registry, catalogId, functions);
+        using var session = new SurfaceSession(registry);
+        Apply(session, new JsonObject
+        {
+            ["version"] = "1.0",
+            ["createSurface"] = new JsonObject { ["surfaceId"] = surfaceId, ["catalogId"] = catalogId }
+        });
+
+        var evaluator = new FunctionEvaluator(registry);
+        var effects = new List<string>();
+        if (local.ValueKind == JsonValueKind.Object)
+            foreach (var function in local.EnumerateObject())
+            {
+                var write = function.Value.GetProperty("effect").GetProperty("setData");
+                evaluator.RegisterHostFunction(catalogId, function.Name, call =>
+                {
+                    var error = session.WriteData(call.SurfaceId, write.GetProperty("path").GetString()!, write.GetProperty("value"));
+                    Require(error is null, error?.ToString() ?? "");
+                    effects.Add(call.Name);
+                    return Parse("true");
+                });
+            }
+
+        var sent = new List<WireMessage>();
+        var errors = new List<RendererError>();
+        var results = new List<JsonElement>();
+        var events = new List<WireMessage>();
+        using var client = new AgentFunctionClient(sent.Add);
+        using var router = new FunctionCallRouter(session, registry, evaluator, client);
+        router.ErrorReported += errors.Add;
+        router.ActionDispatched += events.Add;
+        router.InvokeFunctionAction(surfaceId, "source", "/", scenario.GetProperty("actionPayload"), results.Add);
+        Require(sent.Count == 1 && results.Count == 0 && errors.Count == 0, "Expected one pending call.");
+        var outbound = sent[0].Payload;
+        var callId = outbound.GetProperty("functionCallId").GetString();
+        var expectedCall = expectation.GetProperty("outboundCall").GetProperty("callAgentFunction");
+        Require(outbound.GetProperty("surfaceId").GetString() == expectedCall.GetProperty("surfaceId").GetString() &&
+            NodeCases.JsonEquals(outbound.GetProperty("callFunction"), expectedCall.GetProperty("callFunction")),
+            $"The outbound call differs: {outbound.GetRawText()}");
+
+        var response = new JsonObject { ["functionCallId"] = callId };
+        if (scenario.TryGetProperty("inboundResponseError", out var failure))
+            response["error"] = JsonNode.Parse(failure.GetRawText());
+        else
+            response["value"] = JsonNode.Parse(scenario.GetProperty("inboundResponseValue").GetRawText());
+        Require(router.ReceiveResponse(Decode(new JsonObject { ["version"] = "1.0", ["agentFunctionResponse"] = response },
+            WireDirection.AgentToRenderer)), "The reply matched no call.");
+
+        if (expectation.TryGetProperty("result", out var result))
+            Require(results.Count == 1 && NodeCases.JsonEquals(results[0], result) && errors.Count == 0, "The action result differs.");
+        if (expectation.TryGetProperty("dataModel", out var data))
+        {
+            Require(session.TryGetSurface(surfaceId, out var snapshot) && NodeCases.JsonEquals(snapshot!.DataModel, data),
+                "The action did not preserve only the earlier effects.");
+            Require(effects.SequenceEqual(["markStarted"]), "The earlier effect must run exactly once.");
+        }
+        if (expectation.TryGetProperty("surfaceError", out var errorExpectation))
+        {
+            Require(errors.Count == 1 && results.Count == 0, "Expected one action failure.");
+            Require(errors[0].Code == errorExpectation.GetProperty("code").GetString() &&
+                errors[0].FunctionCallId == callId, "The error does not identify the failed RPC.");
+        }
+        Require(sent.Count == 1 && events.Count == 0, "The function action sent an unexpected message.");
     }
 
     // ---- agent_function_routing ----

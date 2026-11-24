@@ -93,7 +93,25 @@ public sealed class FunctionCallRouter : IDisposable
     /// </remarks>
     /// <exception cref="InvalidOperationException">The surface does not exist.</exception>
     public void Invoke(string surfaceId, string sourceComponentId, string dataPath, JsonElement action,
-        bool userInitiated = true, JsonElement? metadata = null)
+        bool userInitiated = true, JsonElement? metadata = null) =>
+        InvokeCore(surfaceId, sourceComponentId, dataPath, action, null, userInitiated, metadata);
+
+    /// <summary>Invokes a function action and delivers its successful result to the caller.</summary>
+    /// <param name="surfaceId">The surface that owns the action.</param>
+    /// <param name="sourceComponentId">The component that raised the action.</param>
+    /// <param name="dataPath">The absolute pointer to the component's data scope.</param>
+    /// <param name="action">The action object containing a functionCall member.</param>
+    /// <param name="completed">Receives the successful function result, possibly synchronously. Failures are reported through <see cref="ErrorReported"/>.</param>
+    /// <param name="userInitiated">Whether a user gesture started the action.</param>
+    public void InvokeFunctionAction(string surfaceId, string sourceComponentId, string dataPath, JsonElement action,
+        Action<JsonElement> completed, bool userInitiated = true)
+    {
+        ArgumentNullException.ThrowIfNull(completed);
+        InvokeCore(surfaceId, sourceComponentId, dataPath, action, completed, userInitiated, null);
+    }
+
+    private void InvokeCore(string surfaceId, string sourceComponentId, string dataPath, JsonElement action,
+        Action<JsonElement>? completed, bool userInitiated, JsonElement? metadata)
     {
         ArgumentNullException.ThrowIfNull(surfaceId);
         ArgumentNullException.ThrowIfNull(sourceComponentId);
@@ -111,8 +129,9 @@ public sealed class FunctionCallRouter : IDisposable
         if (action.TryGetProperty("functionCall", out var call))
         {
             operation.Call = call;
+            operation.Completed = completed;
         }
-        else if (action.TryGetProperty("event", out var definition) && definition.ValueKind == JsonValueKind.Object)
+        else if (completed is null && action.TryGetProperty("event", out var definition) && definition.ValueKind == JsonValueKind.Object)
         {
             if (!definition.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String ||
                 name.GetString()!.Length == 0)
@@ -211,13 +230,22 @@ public sealed class FunctionCallRouter : IDisposable
     {
         if (binding.Ended || !_session.TryGetSurface(binding.SurfaceId, out var surface) || surface is null)
             return;
-        var outcome = Eval(new(surface, binding.DataPath, false, binding, null), binding.Expression, "");
-        binding.Update(outcome.Status, outcome.Value);
+        HashSet<string>? reported = null;
+        void ReportOnce(A2uiDiagnostic failure)
+        {
+            reported ??= new(StringComparer.Ordinal);
+            var key = failure.Code + "|" + failure.Message;
+            if (reported.Add(key) && !binding.Reported.Contains(key))
+                Report(binding.SurfaceId, failure, null, "");
+        }
 
-        if (outcome.Status != EvaluationStatus.Failed)
-            binding.Reported.Clear();
-        else if (outcome.Diagnostic is { } failure && binding.Reported.Add(failure.Code + "|" + failure.Message))
-            Report(binding.SurfaceId, failure, null, "");
+        var outcome = Eval(new(surface, binding.DataPath, false, binding, null, ReportOnce), binding.Expression, "");
+        if (outcome.Diagnostic is { } failure)
+            ReportOnce(failure);
+        binding.Reported.Clear();
+        if (reported is not null)
+            binding.Reported.UnionWith(reported);
+        binding.Update(outcome.Status, outcome.Value);
     }
 
     private void OnEntryOutcome(string surfaceId, CacheEntry entry, AgentFunctionOutcome outcome)
@@ -252,7 +280,8 @@ public sealed class FunctionCallRouter : IDisposable
     {
         if (operation.Done || !_session.TryGetSurface(operation.SurfaceId, out var surface) || surface is null)
             return;
-        var context = new Context(surface, operation.DataPath, operation.UserInitiated, null, operation);
+        var context = new Context(surface, operation.DataPath, operation.UserInitiated, null, operation,
+            problem => Report(operation.SurfaceId, problem, null, ""));
 
         if (operation.Call is { } call)
         {
@@ -260,7 +289,9 @@ public sealed class FunctionCallRouter : IDisposable
             if (outcome.Status == EvaluationStatus.Pending)
                 return;
             Finish(operation);
-            if (outcome.Diagnostic is { } failure)
+            if (outcome.Status == EvaluationStatus.Value)
+                operation.Completed?.Invoke(outcome.Value);
+            else if (outcome.Diagnostic is { } failure)
                 Report(operation.SurfaceId, failure, null, "");
             return;
         }
@@ -412,6 +443,9 @@ public sealed class FunctionCallRouter : IDisposable
 
     private Outcome EvalCall(Context context, JsonElement call, string site)
     {
+        if (context.Operation?.LocalResults.TryGetValue(site, out var previous) == true)
+            return previous;
+
         var surface = context.Surface;
         var name = call.GetProperty("@call").GetString();
         if (name is null)
@@ -441,10 +475,13 @@ public sealed class FunctionCallRouter : IDisposable
         if (route == CallRoute.Local)
         {
             var values = arguments.Value.EnumerateObject().ToDictionary(member => member.Name, member => member.Value, StringComparer.Ordinal);
-            return _functions.TryInvoke(surface, context.DataPath, catalogId!, name, values, context.UserInitiated,
-                out var result, out diagnostic)
+            var outcome = _functions.TryInvoke(surface, context.DataPath, catalogId!, name, values, context.UserInitiated,
+                out var result, out diagnostic, context.ReportPartError)
                 ? Outcome.Of(result)
                 : Outcome.Fail(diagnostic);
+            if (context.Operation is { } operation)
+                operation.LocalResults[site] = outcome;
+            return outcome;
         }
 
         var sendable = arguments.Value;
@@ -615,7 +652,7 @@ public sealed class FunctionCallRouter : IDisposable
     }
 
     private sealed record Context(SurfaceSnapshot Surface, string DataPath, bool UserInitiated, FunctionBinding? Binding,
-        Operation? Operation);
+        Operation? Operation, Action<A2uiDiagnostic>? ReportPartError = null);
 
     private sealed class SurfaceState
     {
@@ -652,11 +689,13 @@ public sealed class FunctionCallRouter : IDisposable
         public JsonElement? Metadata { get; } = metadata;
         public bool Done { get; set; }
         public JsonElement? Call { get; set; }
+        public Action<JsonElement>? Completed { get; set; }
         public string? EventName { get; set; }
         public JsonElement? UserMessage { get; set; }
         public List<(string Name, JsonElement Expression)> Entries { get; } = [];
         public List<(string Key, JsonElement Value)> Resolved { get; } = [];
         public Dictionary<string, Slot> Slots { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, Outcome> LocalResults { get; } = new(StringComparer.Ordinal);
     }
 
 }
