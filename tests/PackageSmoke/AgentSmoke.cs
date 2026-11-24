@@ -87,6 +87,57 @@ internal static class AgentSmoke
         var small = new DirectJsonStream(limited, maxCharacters: 16);
         if (small.Read("<a2ui-json>[" + first, out _)?.Code != "ResourceLimit")
             throw new InvalidOperationException("The stream size limit was not enforced.");
+
+        CheckRejectedPrefix(first, bad);
+        CheckRejectedBlockRecovery(first);
+    }
+
+    private static void CheckRejectedPrefix(string first, string bad)
+    {
+        const string open = "<a2ui-json>";
+        const string close = "</a2ui-json>";
+        const string second = """{"version":"1.0","createSurface":{"surfaceId":"t"}}""";
+        using var malformedState = new RendererState(new CatalogRegistry());
+        var malformed = new DirectJsonStream(malformedState);
+        if (malformed.Read(open + "[" + first + second, out var prefix) is not null ||
+            prefix.Sum(p => p.Messages?.Count ?? 0) != 1 ||
+            malformed.Read("]" + close, out var rejected)?.Code != "ParseError" ||
+            rejected.Count != 0 || !malformedState.TryGetSurface("s", out _) ||
+            malformedState.TryGetSurface("t", out _))
+            throw new InvalidOperationException("An object without an array separator was emitted.");
+
+        using var completeState = new RendererState(new CatalogRegistry());
+        var complete = new DirectJsonStream(completeState);
+        if (complete.Read(open + "[" + first + "," + bad + "]" + close, out var accepted)?.Code != "ValidationError" ||
+            accepted.Sum(p => p.Messages?.Count ?? 0) != 1 || !completeState.TryGetSurface("s", out _))
+            throw new InvalidOperationException("A complete block lost the valid prefix before a terminal validation error.");
+    }
+
+    private static void CheckRejectedBlockRecovery(string first)
+    {
+        using var state = new RendererState(new CatalogRegistry());
+        var stream = new DirectJsonStream(state, continueAfterRejectedBlock: true);
+        if (stream.Read("""<a2ui-json>{"broken":"unterminated</a2ui-""", out var waiting) is not null ||
+            waiting.Count != 0 ||
+            stream.Read("json> after <a2ui-json>" + first + "</a2ui-json>", out var recovered) is not null ||
+            recovered.Count != 3 || recovered[0].Error?.Code != "ParseError" ||
+            recovered[1].Text != "after" || recovered[2].Messages?.Count != 1 ||
+            !state.TryGetSurface("s", out _) || stream.InBlock)
+            throw new InvalidOperationException("Recovery lost the text and block after an unterminated string.");
+
+        var literal = new DirectJsonStream(state, continueAfterRejectedBlock: true);
+        const string text = "</a2ui-json><a2ui-json>[]";
+        if (literal.Read("""<a2ui-json>{"version":"1.0","updateDataModel":{"surfaceId":"s","value":{"text":"</a2ui-""",
+                out var partial) is not null || partial.Count != 0 ||
+            literal.Read("""json><a2ui-json>[]" }}}</a2ui-json>""", out var delivered) is not null ||
+            delivered.Count != 1 || delivered[0].Messages?.Count != 1 ||
+            delivered[0].Messages![0].Payload.GetProperty("value").GetProperty("text").GetString() != text)
+            throw new InvalidOperationException("Recovery treated literal JSON string content as framing.");
+
+        var final = new DirectJsonStream(state, continueAfterRejectedBlock: true);
+        if (final.Read("""<a2ui-json>{"broken":"unterminated</a2ui-json> after""", out var tail, final: true) is not null ||
+            tail.Count != 2 || tail[0].Error?.Code != "ParseError" || tail[1].Text != "after")
+            throw new InvalidOperationException("Recovery lost the text after the last rejected block.");
     }
 
     internal static void Run()

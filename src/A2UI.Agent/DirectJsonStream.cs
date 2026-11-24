@@ -27,6 +27,7 @@ public sealed class DirectJsonStream
     private bool _skipping;
     private bool _inString;
     private bool _escaped;
+    private int _possibleClose = -1;
     private readonly StringBuilder _body = new();
     private readonly HashSet<string> _surfaces = new(StringComparer.Ordinal);
     private readonly List<string> _emitted = [];
@@ -75,6 +76,7 @@ public sealed class DirectJsonStream
         }
         var input = _tail + chunk;
         _tail = "";
+    Scan:
         var start = 0;
         for (var i = 0; i < input.Length; i++)
         {
@@ -98,19 +100,29 @@ public sealed class DirectJsonStream
                 }
                 continue;
             }
-            if (!_inString && _wrapped && input[i] == '<')
+            if (_wrapped && input[i] == '<')
             {
                 if (input.AsSpan(i).StartsWith(Close, StringComparison.Ordinal))
                 {
-                    var error = Flush(true);
-                    InBlock = false;
-                    Reset();
-                    if (error is not null) return error;
-                    i += Close.Length - 1;
-                    start = i + 1;
-                    continue;
+                    if (!_inString)
+                    {
+                        if (RecoverFromHiddenClose(true, input[i..], out var remaining))
+                        {
+                            input = remaining;
+                            goto Scan;
+                        }
+                        var error = Flush(true);
+                        InBlock = false;
+                        Reset();
+                        if (error is not null) return error;
+                        i += Close.Length - 1;
+                        start = i + 1;
+                        continue;
+                    }
+                    if (_recover && _possibleClose < 0)
+                        _possibleClose = _body.Length;
                 }
-                if (!final && Close.AsSpan().StartsWith(input.AsSpan(i), StringComparison.Ordinal))
+                else if (!final && Close.AsSpan().StartsWith(input.AsSpan(i), StringComparison.Ordinal))
                 {
                     _tail = input[i..];
                     break;
@@ -120,11 +132,17 @@ public sealed class DirectJsonStream
             if (_escaped) _escaped = false;
             else if (_inString && c == '\\') _escaped = true;
             else if (c == '"') _inString = !_inString;
-            if (!_skipping) _body.Append(c);
+            if (!_skipping || _recover) _body.Append(c);
         }
 
         if (InBlock)
         {
+            if (RecoverFromHiddenClose(final, _tail, out var remaining))
+            {
+                input = remaining;
+                _tail = "";
+                goto Scan;
+            }
             if (final && _wrapped)
             {
                 _completed = true;
@@ -138,6 +156,29 @@ public sealed class DirectJsonStream
             Text(input[start..], final);
         _completed = final;
         return null;
+
+        bool RecoverFromHiddenClose(bool blockEnded, string suffix, out string remaining)
+        {
+            remaining = "";
+            if (_possibleClose < 0) return false;
+            var body = _body.ToString();
+            var afterClose = _possibleClose + Close.Length;
+            var next = body.IndexOf(Open, afterClose, StringComparison.Ordinal);
+            if (next < 0 && (!final || suffix.Length != 0))
+                return false;
+            if (!_skipping && (blockEnded
+                ? DirectJson.Decode(body, out _)?.Code != "ParseError"
+                : !HasInvalidJson(DirectJson.Clean(body), out _)))
+                return false;
+
+            // The apparent string cannot be valid JSON. Resume at the hidden
+            // delimiter, keeping any conversational text before the next block.
+            remaining = body[afterClose..] + suffix;
+            Reject(new("ParseError", "", "Expected a Direct JSON message block."));
+            InBlock = false;
+            Reset();
+            return true;
+        }
 
         void Text(string value, bool finish)
         {
@@ -156,20 +197,26 @@ public sealed class DirectJsonStream
         A2uiDiagnostic? Flush(bool closed)
         {
             if (_skipping) return null;
-            var raw = _body.ToString().Trim().Trim((char)96).Trim();
+            var raw = DirectJson.Clean(_body.ToString());
             if (raw.Length == 0 && !closed) return null;
             var candidates = new List<WireMessage>();
             var diagnostic = closed ? DecodeAll(raw, candidates) : Preview(raw, candidates);
-            if (diagnostic is not null) return Reject(diagnostic);
+            if (closed && diagnostic is not null && !_recover)
+                Preview(raw, candidates, heal: false);
+
             var delta = new List<WireMessage>();
             for (var n = 0; n < candidates.Count; n++)
                 if (n >= _emitted.Count || candidates[n].Envelope.GetRawText() != _emitted[n])
                     delta.Add(candidates[n]);
-            if (delta.Count == 0 && !closed) return null;
-            var problem = _state.Prepare(delta, out var turn, _surfaces, closed, default);
+            if (delta.Count == 0 && (diagnostic is not null || !closed))
+                return diagnostic is null ? null : Reject(diagnostic);
+            var validateGraph = closed && diagnostic is null;
+            var problem = _state.Prepare(delta, out var turn, _surfaces, validateGraph, default);
             if (problem is not null)
             {
-                if (!closed)
+                // Recovery keeps a rejected whole block atomic. The terminal path
+                // keeps the valid prefix, as it does when the block spans chunks.
+                if (!closed || (!_recover && FailsBeforeGraphValidation(delta, validateGraph)))
                 {
                     var prefix = new List<WireMessage>();
                     foreach (var message in delta)
@@ -203,7 +250,15 @@ public sealed class DirectJsonStream
                 _emitted.Clear();
                 _emitted.AddRange(candidates.Select(m => m.Envelope.GetRawText()));
             }
-            return null;
+            return diagnostic is null ? null : Reject(diagnostic);
+        }
+
+        bool FailsBeforeGraphValidation(List<WireMessage> delta, bool validateGraph)
+        {
+            if (!validateGraph) return true;
+            var error = _state.Prepare(delta, out var relaxed, null, false, default);
+            relaxed?.Dispose();
+            return error is not null;
         }
 
         A2uiDiagnostic? Reject(A2uiDiagnostic error)
@@ -225,6 +280,7 @@ public sealed class DirectJsonStream
         _surfaces.Clear();
         _emitted.Clear();
         _inString = _escaped = _skipping = false;
+        _possibleClose = -1;
     }
 
     private static A2uiDiagnostic? DecodeAll(string raw, List<WireMessage> result)
@@ -234,8 +290,36 @@ public sealed class DirectJsonStream
         return error;
     }
 
-    private A2uiDiagnostic? Preview(string raw, List<WireMessage> result)
+    private static bool HasInvalidJson(string raw, out int completePrefix)
     {
+        var bytes = Encoding.UTF8.GetBytes(raw);
+        var reader = new Utf8JsonReader(bytes, isFinalBlock: false,
+            new(new JsonReaderOptions { AllowTrailingCommas = true }));
+        var prefixBytes = 0;
+        var messageDepth = raw.StartsWith('[') ? 1 : 0;
+        try
+        {
+            while (reader.Read())
+                if (reader.TokenType == JsonTokenType.EndObject && reader.CurrentDepth == messageDepth)
+                    prefixBytes = (int)reader.BytesConsumed;
+        }
+        catch (JsonException)
+        {
+            completePrefix = Encoding.UTF8.GetCharCount(bytes.AsSpan(0, prefixBytes));
+            return true;
+        }
+        completePrefix = raw.Length;
+        return false;
+    }
+
+    private A2uiDiagnostic? Preview(string raw, List<WireMessage> result, bool heal = true)
+    {
+        // Only decode objects reached through valid JSON structure.
+        if (HasInvalidJson(raw, out var completePrefix))
+        {
+            raw = raw[..completePrefix];
+            heal = false;
+        }
         var braces = new Stack<(char Token, int Start, string? Key)>();
         var stringStart = -1;
         var escaped = false;
@@ -279,7 +363,7 @@ public sealed class DirectJsonStream
             }
             else if (c == ',') key = null;
         }
-        if (valueStart < 0) return null;
+        if (!heal || valueStart < 0) return null;
         var end = raw.Length;
         if (componentStart >= 0)
         {
