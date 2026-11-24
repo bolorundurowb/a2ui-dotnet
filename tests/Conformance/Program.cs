@@ -50,8 +50,11 @@ foreach (var suite in new[] { "core", "agent" })
                 (_, _, "conformance/core/message_processor_scaling.yaml") when id == "test_scaling_process_single_component_messages_v10" =>
                     "SurfaceSession requires topology validation and has no unchecked processing mode.",
                 _ when !scaling && CoreCases.Supports(path, id) => null,
-                (_, _, "conformance/core/expressions.yaml") when id == "test_expression_parser_nested_function_call" =>
-                    "The case requires the Basic Catalog formatCurrency implementation.",
+                _ when !scaling && FunctionCases.Supports(path, test) => null,
+                _ when OutboundCases.Handles(path) && OutboundCases.ExclusionReason(path, id) is { } outboundReason => outboundReason,
+                _ when !scaling && OutboundCases.Handles(path) => null,
+                (_, _, "conformance/core/functions.yaml" or "conformance/core/index_function.yaml")
+                    when FunctionCases.ExclusionReason(path, test) is { } why => why,
                 (_, _, "conformance/core/node_resolution.yaml") when NodeCases.Supports(id) => null,
                 (_, _, "conformance/core/node_resolution.yaml") => NodeCases.ExclusionReason(test, assets),
                 _ when !scaling && AgentCases.Supports(path, test) => null,
@@ -95,8 +98,13 @@ foreach (var suite in new[] { "core", "agent" })
                         Console.WriteLine($"{id} {CoreScaling.Run(test, assets)}");
                     else if (suite == "agent")
                         AgentCases.Run(test, assets);
+                    else if (OutboundCases.Handles(path))
+                        OutboundCases.Run(path, test, assets);
                     else if (path == "conformance/core/node_resolution.yaml")
                         NodeCases.Run(test, assets);
+                    else if (path is "conformance/core/functions.yaml" or "conformance/core/validation_result.yaml"
+                        or "conformance/core/index_function.yaml")
+                        FunctionCases.Run(assets, test);
                     else
                         CoreCases.Run(path, test, assets);
                     results.Add(new(suite, path, id, version, "pass", null));

@@ -7,7 +7,7 @@ internal static class CoreCases
 {
     internal static bool Supports(string file, string id) => (file, id) switch
     {
-        ("conformance/core/expressions.yaml", _) when id != "test_expression_parser_nested_function_call" => true,
+        ("conformance/core/expressions.yaml", _) => true,
         ("conformance/core/data_model_pointers.yaml" or "conformance/core/data_deletion.yaml", _) => true,
         ("conformance/core/validator_v1_0.yaml", _) when id.StartsWith("test_v10_topology_", StringComparison.Ordinal) ||
             id.StartsWith("test_v10_component_nesting_depth_", StringComparison.Ordinal) ||
@@ -128,6 +128,7 @@ internal static class CoreCases
         Require(registry.TryRegister(Encoding.UTF8.GetBytes(alias.ToJsonString()), out var registrationError),
             registrationError?.ToString() ?? "Basic Catalog alias is unavailable.");
         using var session = new SurfaceSession(registry);
+        var evaluator = new FunctionEvaluator(registry);
         foreach (var step in test.GetProperty("steps").EnumerateArray())
         {
             foreach (var item in step.GetProperty("payload").EnumerateArray())
@@ -138,10 +139,8 @@ internal static class CoreCases
                 Require(applyError is null, applyError?.ToString() ?? "Failed to apply expression fixture message.");
             }
             Require(session.TryGetSurface("main", out var surface) && surface is not null, "Missing expression surface.");
-            var definition = surface!.Components["root"].GetProperty("text");
-            var template = definition.GetProperty("args").GetProperty("value").GetString()!;
-            var evaluated = ExpressionTemplate.TryEvaluate(template, surface.DataModel, default, surface.CatalogId,
-                invoke: null, out var text, out var diagnostic);
+            var call = surface!.Components["root"].GetProperty("text");
+            var evaluated = evaluator.TryEvaluate(surface, "/", call, userInitiated: false, out var result, out var diagnostic);
             if (step.TryGetProperty("expectError", out var error))
                 Require(!evaluated && diagnostic?.Message.Contains(error.GetProperty("message").GetString()!,
                     StringComparison.Ordinal) == true, diagnostic?.ToString() ?? "Expected evaluation failure.");
@@ -149,7 +148,7 @@ internal static class CoreCases
             {
                 var expected = test.GetProperty("expect").GetProperty("surfaces").GetProperty("main")
                     .GetProperty("components").GetProperty("root").GetProperty("text").GetString();
-                Require(evaluated && text == expected, diagnostic?.ToString() ?? "Interpolated text differs.");
+                Require(evaluated && result.GetString() == expected, diagnostic?.ToString() ?? "Interpolated text differs.");
             }
         }
     }
@@ -317,6 +316,23 @@ internal static class CoreCases
 
     private static void RunLifecycle(JsonElement test, string assets)
     {
+        var registry = BuildRegistry(test, assets);
+        var strict = test.TryGetProperty("strictMode", out var strictMode) && strictMode.GetBoolean();
+        var validate = test.TryGetProperty("action", out var action) && action.ValueEquals("validate");
+        using var session = new SurfaceSession(registry, strict ? GraphValidationOptions.Strict : GraphValidationOptions.Progressive);
+        if (test.TryGetProperty("steps", out var steps))
+        {
+            foreach (var step in steps.EnumerateArray())
+                RunStep(session, step, validate);
+            CheckSurfaces(session, test);
+        }
+        else
+            RunStep(session, test, validate);
+    }
+
+    // The registry holds the pinned Basic Catalog under the aliases the fixtures use, plus any catalogs the case declares.
+    internal static CatalogRegistry BuildRegistry(JsonElement test, string assets)
+    {
         var catalog = JsonNode.Parse(File.ReadAllBytes(Path.Combine(assets, "catalogs/basic/v1/catalog.json")))!;
         var registry = new CatalogRegistry();
         // Some pinned fixtures refer to the Basic Catalog using test aliases or its previous URI.
@@ -334,18 +350,7 @@ internal static class CoreCases
             foreach (var definition in definitions.EnumerateArray())
                 if (definition.TryGetProperty("catalogId", out _))
                     RegisterCatalog(registry, JsonNode.Parse(definition.GetRawText())!.AsObject());
-
-        var strict = test.TryGetProperty("strictMode", out var strictMode) && strictMode.GetBoolean();
-        var validate = test.TryGetProperty("action", out var action) && action.ValueEquals("validate");
-        using var session = new SurfaceSession(registry, strict ? GraphValidationOptions.Strict : GraphValidationOptions.Progressive);
-        if (test.TryGetProperty("steps", out var steps))
-        {
-            foreach (var step in steps.EnumerateArray())
-                RunStep(session, step, validate);
-            CheckSurfaces(session, test);
-        }
-        else
-            RunStep(session, test, validate);
+        return registry;
     }
 
     private static void RegisterCatalog(CatalogRegistry registry, JsonObject definition)
@@ -395,9 +400,9 @@ internal static class CoreCases
                 null => null,
                 "graphDepth" when validate => "RecursionError",
                 "duplicateComponent" or "circularReference" or "missingRoot" or "orphanComponent" or "danglingReference" or
-                    "invalidComposition" or "graphDepth" when validate => "ValidationError",
+                    "unallowedParent" or "unallowedChild" or "graphDepth" when validate => "ValidationError",
                 "unknownSurface" or "duplicateSurface" or "duplicateComponent" or "circularReference" or "missingRoot" or
-                    "orphanComponent" or "danglingReference" or "invalidComposition" or "graphDepth" => "IntegrityError",
+                    "orphanComponent" or "danglingReference" or "unallowedParent" or "unallowedChild" or "graphDepth" => "IntegrityError",
                 "invalidDataPath" => "DataError",
                 "unknownCatalog" when !validate => "CatalogError",
                 "unsupportedMessage" => null,
