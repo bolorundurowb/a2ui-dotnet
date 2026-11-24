@@ -87,6 +87,7 @@ internal static class CoreSmoke
         CheckExpressionScope();
         CheckNodeResolver(registry);
         CheckFunctions(registry);
+        CheckOutbound(registry);
 
         session.TryGetSurface("form", out var beforeCancellation);
         var cancelled = new CancellationToken(canceled: true);
@@ -310,6 +311,123 @@ internal static class CoreSmoke
             Run(name, args, out var diagnostic);
             return diagnostic?.Code == "ExpressionError" && diagnostic.Message.Contains(messagePart, StringComparison.Ordinal);
         }
+    }
+
+    private sealed class FixedTime : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(2026, 11, 23, 10, 0, 0, TimeSpan.Zero);
+    }
+
+    private static void CheckOutbound(CatalogRegistry registry)
+    {
+        // Two connections reuse the surface ID with different owners and data.
+        const string template = """
+            {"version":"1.0","createSurface":{"surfaceId":"main","catalogId":"BASIC","sendDataModel":true,
+              "dataModel":{"owner":"OWNER","items":[{"id":"a"},{"id":"b"}]},
+              "components":[
+                {"id":"root","component":"Column","children":["save","field","list"]},
+                {"id":"save","component":"Button","child":"label","action":{"event":{"name":"save",
+                  "userMessage":{"@path":"/owner"},
+                  "context":{"owner":{"@path":"/owner"},"literal":{"@@path":"/not/bound"}}}}},
+                {"id":"label","component":"Text","text":"Save"},
+                {"id":"field","component":"TextField","label":"Owner","value":{"@path":"/owner"}},
+                {"id":"list","component":"Column","children":{"componentId":"item","path":"/items"}},
+                {"id":"item","component":"Button","child":"label","action":{"event":{"name":"pick",
+                  "context":{"id":{"@path":"id"},"position":{"@call":"@index"}}}}}]}}
+            """;
+        string Create(string owner) => template.Replace("BASIC", CatalogRegistry.BasicCatalogId, StringComparison.Ordinal)
+            .Replace("OWNER", owner, StringComparison.Ordinal);
+        using var first = new SurfaceSession(registry);
+        using var second = new SurfaceSession(registry);
+        Require(first.Apply(Decode(Create("one"))) is null && second.Apply(Decode(Create("two"))) is null);
+        using var firstNodes = new NodeResolver(first, registry, "main", timeProvider: new FixedTime());
+        using var secondNodes = new NodeResolver(second, registry, "main", timeProvider: new FixedTime());
+        ResolvedNode Find(NodeResolver nodes, string component, int occurrence = 0) =>
+            nodes.Nodes.Where(node => node.ComponentId == component).ElementAt(occurrence);
+
+        // Actions read the data at invocation time, and each session keeps its own data and order.
+        var save = firstNodes.Invoke(Find(firstNodes, "save"), "action");
+        Require(save.Error is null && save.Message is not null);
+        var saved = save.Message!.Payload;
+        Require(saved.GetProperty("name").GetString() == "save" && saved.GetProperty("surfaceId").GetString() == "main" &&
+            saved.GetProperty("sourceComponentId").GetString() == "save" && saved.GetProperty("userMessage").GetString() == "one" &&
+            saved.GetProperty("timestamp").GetString() == "2026-11-23T10:00:00.000Z");
+        Require(saved.GetProperty("context").GetProperty("owner").GetString() == "one" &&
+            saved.GetProperty("context").GetProperty("literal").GetProperty("@path").GetString() == "/not/bound");
+
+        var passiveChanges = 0;
+        firstNodes.PropsChanged += _ => passiveChanges++;
+        using var edit = JsonDocument.Parse("\"edited\"");
+        Require(firstNodes.Write(Find(firstNodes, "field"), "value", edit.RootElement) is null && passiveChanges > 0);
+        var afterEdit = firstNodes.Invoke(Find(firstNodes, "save"), "action");
+        Require(afterEdit.Message!.Payload.GetProperty("context").GetProperty("owner").GetString() == "edited");
+
+        var secondSave = secondNodes.Invoke(Find(secondNodes, "save"), "action");
+        var secondPick = secondNodes.Invoke(Find(secondNodes, "item", 1), "action");
+        var firstPick = firstNodes.Invoke(Find(firstNodes, "item", 0), "action");
+        Require(secondSave.Message!.Payload.GetProperty("context").GetProperty("owner").GetString() == "two");
+        Require(secondPick.Message!.Payload.GetProperty("context").GetProperty("id").GetString() == "b" &&
+            secondPick.Message.Payload.GetProperty("context").GetProperty("position").GetInt32() == 1);
+        Require(firstPick.Message!.Payload.GetProperty("context").GetProperty("id").GetString() == "a" &&
+            firstPick.Message.Payload.GetProperty("context").GetProperty("position").GetInt32() == 0);
+
+        // Only surfaces that opted in are synchronized, and only from the session that owns them.
+        Require(first.Apply(Decode("""
+            {"version":"1.0","createSurface":{"surfaceId":"quiet","catalogId":"BASIC","dataModel":{"secret":1}}}
+            """.Replace("BASIC", CatalogRegistry.BasicCatalogId, StringComparison.Ordinal))) is null);
+        var firstModels = first.GetRendererDataModel()!.Value.GetProperty("surfaces");
+        Require(firstModels.EnumerateObject().Count() == 1 && firstModels.GetProperty("main").GetProperty("owner").GetString() == "edited");
+        Require(second.GetRendererDataModel()!.Value.GetProperty("surfaces").GetProperty("main").GetProperty("owner").GetString() == "two");
+        using (var empty = new SurfaceSession(registry))
+            Require(empty.GetRendererDataModel() is null);
+
+        // Failures become wire errors with the right code and correlation.
+        Require(firstNodes.Invoke(Find(firstNodes, "label"), "text").Error?.Code == "INVALID_ACTION");
+        var duplicate = Decode(Create("one"));
+        var rejection = first.Apply(duplicate);
+        var duplicateError = RendererError.FromRejectedMessage(duplicate, rejection!);
+        var duplicateMessage = duplicateError.ToWireMessage().Payload;
+        Require(duplicateError.Category == "IntegrityError" && duplicateMessage.GetProperty("code").GetString() == "INTEGRITY_ERROR" &&
+            duplicateMessage.GetProperty("surfaceId").GetString() == "main");
+        var malformed = Encoding.UTF8.GetBytes("""{"version":"1.0","deleteSurface":{}}""");
+        Require(!WireMessage.TryDecode(malformed, WireDirection.AgentToRenderer, out _, out var malformedProblem));
+        var malformedMessage = RendererError.FromRejectedEnvelope(malformed, malformedProblem!).ToWireMessage().Payload;
+        Require(malformedMessage.GetProperty("code").GetString() == "VALIDATION_FAILED" &&
+            malformedMessage.GetProperty("path").GetString() == "/surfaceId" && malformedMessage.GetProperty("surfaceId").GetString() == "");
+        var rpc = Encoding.UTF8.GetBytes("""
+            {"version":"1.0","callRendererFunction":{"functionCallId":"c1","callFunction":{"@call":"now"}}}
+            """);
+        Require(!WireMessage.TryDecode(rpc, WireDirection.AgentToRenderer, out _, out var rpcProblem));
+        var rpcMessage = RendererError.FromRejectedEnvelope(rpc, rpcProblem!).ToWireMessage().Payload;
+        Require(rpcMessage.GetProperty("code").GetString() == "INVALID_FUNCTION_CALL" &&
+            rpcMessage.GetProperty("functionCallId").GetString() == "c1" && !rpcMessage.TryGetProperty("surfaceId", out _) &&
+            rpcMessage.GetProperty("message").GetString()!.Contains("catalogId", StringComparison.Ordinal));
+        var proto = Decode("""{"version":"1.0","updateDataModel":{"surfaceId":"main","path":"/a/__proto__","value":1}}""");
+        Require(RendererError.FromRejectedMessage(proto, first.Apply(proto)!).Code == "DATA_ERROR");
+
+        // Function actions run locally, refuse without user activation, and never emit a message.
+        first.TryGetSurface("main", out var surface);
+        var dispatcher = new ActionDispatcher(new FunctionEvaluator(registry));
+        using var open = JsonDocument.Parse("""{"functionCall":{"@call":"openUrl","args":{"url":"https://example.test"}}}""");
+        var refused = dispatcher.Dispatch(surface!, "link", "/", open.RootElement, userInitiated: false);
+        Require(refused.Message is null && refused.Error?.Code == "EXPRESSION_ERROR" && refused.Error.SurfaceId == "main");
+        var allowed = dispatcher.Dispatch(surface!, "link", "/", open.RootElement);
+        Require(allowed.Message is null && allowed.Error is null);
+        using var wrongMessage = JsonDocument.Parse("""{"event":{"name":"x","userMessage":{"@path":"/items"}}}""");
+        Require(dispatcher.Dispatch(surface!, "b", "/", wrongMessage.RootElement).Error?.Code == "INVALID_ACTION");
+        using var badKey = JsonDocument.Parse("""{"event":{"name":"x","context":{"k":{"@other":1}}}}""");
+        var badContext = dispatcher.Dispatch(surface!, "b", "/", badKey.RootElement).Error;
+        Require(badContext?.Code == "EXPRESSION_ERROR" && badContext.Message.Contains("context entry 'k'", StringComparison.Ordinal));
+        using var badExtension = JsonDocument.Parse("""{"extensions":{"not-valid":"x"}}""");
+        using var plain = JsonDocument.Parse("""{"event":{"name":"x"}}""");
+        Require(dispatcher.Dispatch(surface!, "b", "/", plain.RootElement, metadata: badExtension.RootElement).Error?.Code == "VALIDATION_FAILED");
+
+        // Capabilities list every registered catalog, with definitions only on request.
+        var capabilities = registry.CreateRendererCapabilities().Value.GetProperty("1.0");
+        Require(capabilities.GetProperty("supportedCatalogIds").EnumerateArray().Count() == registry.CatalogIds.Count &&
+            !capabilities.TryGetProperty("inlineCatalogs", out _));
+        Require(registry.CreateRendererCapabilities(includeInlineCatalogs: true).Value.GetProperty("1.0")
+            .GetProperty("inlineCatalogs").GetArrayLength() == registry.CatalogIds.Count);
     }
 
     private static void CheckOccurrences(CatalogRegistry registry)

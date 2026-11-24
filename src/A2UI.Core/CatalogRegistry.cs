@@ -22,6 +22,37 @@ public sealed class CatalogRegistry
     /// <summary>Gets a live view of the currently registered catalog identifiers.</summary>
     public IReadOnlyCollection<string> CatalogIds => _catalogs.Keys;
 
+    /// <summary>Describes the registered catalogs in the <c>a2uiRendererCapabilities</c> metadata for A2UI 1.0.</summary>
+    /// <param name="includeInlineCatalogs">Whether to include each catalog definition in <c>inlineCatalogs</c>. Set it only for an agent that declares <c>acceptsInlineCatalogs</c>.</param>
+    /// <returns>The validated capabilities metadata. Catalog IDs are in ordinal order.</returns>
+    public WireMetadata CreateRendererCapabilities(bool includeInlineCatalogs = false)
+    {
+        var ids = _catalogs.Keys.Order(StringComparer.Ordinal).ToArray();
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteStartObject(WireMessage.Version);
+            writer.WriteStartArray("supportedCatalogIds");
+            foreach (var id in ids)
+                writer.WriteStringValue(id);
+            writer.WriteEndArray();
+            if (includeInlineCatalogs)
+            {
+                writer.WriteStartArray("inlineCatalogs");
+                foreach (var id in ids)
+                    _catalogs[id].Definition.WriteTo(writer);
+                writer.WriteEndArray();
+            }
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        if (!WireMetadata.TryDecode(stream.ToArray(), WireMetadataKind.RendererCapabilities, out var metadata, out var problem))
+            throw new InvalidOperationException($"The catalogs do not form valid capabilities: {problem}");
+        return metadata!;
+    }
+
     /// <summary>Registers an application-supplied catalog. Callers serialize registry changes and validation.</summary>
     /// <param name="utf8">The complete UTF-8 catalog definition.</param>
     /// <param name="diagnostic">The reason registration failed, if any.</param>
@@ -209,7 +240,7 @@ public sealed class CatalogRegistry
         if (id is null || !_catalogs.TryGetValue(id, out var catalog))
             return new("unknownCatalog", WireJson.Path("", catalogKey), "Catalog is unavailable.");
         if (!catalog.Definition.TryGetProperty(group, out var items) || !items.TryGetProperty(name.GetString()!, out var schema))
-            return new("unknownCatalogItem", WireJson.Path("", nameKey), "Catalog item is unavailable.");
+            return new("unknownCatalogItem", WireJson.Path("", nameKey), $"Catalog item '{name.GetString()}' is unavailable.");
 
         var common = ProtocolSchemas.Resolve("common_types.json")!.Value;
         return group == "components"

@@ -102,6 +102,8 @@ public sealed class ResolvedNode
     public ValidationResult? BlockingResult =>
         ValidationResults.FirstOrDefault(result => result.Severity == "error");
 
+    internal IReadOnlyDictionary<string, JsonElement> Actions { get; set; } = new Dictionary<string, JsonElement>();
+
     internal string Signature { get; set; } = "";
 }
 
@@ -117,6 +119,7 @@ public sealed class NodeResolver : IDisposable
     private readonly SurfaceSession _session;
     private readonly CatalogRegistry _catalogs;
     private readonly FunctionEvaluator _functions;
+    private readonly ActionDispatcher _actions;
     private readonly string _surfaceId;
     private Dictionary<string, ResolvedNode> _nodesByInstance = new(StringComparer.Ordinal);
     private bool _disposed;
@@ -125,12 +128,15 @@ public sealed class NodeResolver : IDisposable
     /// <param name="session">The session that owns the surface.</param>
     /// <param name="catalogs">The registry that supplies component schemas.</param>
     /// <param name="surfaceId">The identifier of the surface to resolve.</param>
-    /// <param name="functions">The evaluator for computed bindings and check conditions. Defaults to one over <paramref name="catalogs"/>.</param>
-    public NodeResolver(SurfaceSession session, CatalogRegistry catalogs, string surfaceId, FunctionEvaluator? functions = null)
+    /// <param name="functions">The evaluator for computed bindings, check conditions and actions. Defaults to one over <paramref name="catalogs"/>.</param>
+    /// <param name="timeProvider">The clock for action timestamps. Defaults to <see cref="TimeProvider.System"/>.</param>
+    public NodeResolver(SurfaceSession session, CatalogRegistry catalogs, string surfaceId, FunctionEvaluator? functions = null,
+        TimeProvider? timeProvider = null)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _catalogs = catalogs ?? throw new ArgumentNullException(nameof(catalogs));
         _functions = functions ?? new FunctionEvaluator(catalogs);
+        _actions = new ActionDispatcher(_functions, timeProvider);
         _surfaceId = surfaceId ?? throw new ArgumentNullException(nameof(surfaceId));
         _session.Changed += OnChanged;
         Refresh();
@@ -160,6 +166,25 @@ public sealed class NodeResolver : IDisposable
             return new("notWritable", "/" + property, "The property is not a writable binding.");
 
         return _session.WriteScopedData(_surfaceId, node.DataPath, resolved.BindingPath, value);
+    }
+
+    /// <summary>Invokes an action property on a node against the current data.</summary>
+    /// <param name="node">A node from <see cref="Nodes"/>.</param>
+    /// <param name="property">The name of a property whose resolved kind is an action.</param>
+    /// <param name="userInitiated">Whether the invocation follows a user gesture.</param>
+    /// <param name="metadata">Optional <c>action.metadata</c> to attach to the action message.</param>
+    /// <returns>The message to send or the error to report. Calling a property that is not an action reports an <c>INVALID_ACTION</c> error.</returns>
+    /// <remarks>Context bindings are read when the action is invoked, not when the node resolved.</remarks>
+    public ActionResult Invoke(ResolvedNode node, string property, bool userInitiated = true, JsonElement? metadata = null)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        ArgumentNullException.ThrowIfNull(property);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_session.TryGetSurface(_surfaceId, out var snapshot) || snapshot is null)
+            return new(null, RendererError.FromDiagnostic(new("unknownSurface", "", $"Surface '{_surfaceId}' does not exist."), _surfaceId));
+        if (!node.Actions.TryGetValue(property, out var action))
+            return new(null, RendererError.FromDiagnostic(new("invalidAction", "", $"The property '{property}' is not an action."), _surfaceId));
+        return _actions.Dispatch(snapshot, node.ComponentId, node.DataPath, action, userInitiated, metadata);
     }
 
     /// <summary>Stops tracking the surface and clears the mounted nodes.</summary>
@@ -220,6 +245,7 @@ public sealed class NodeResolver : IDisposable
             node.ComponentType = occurrence.ComponentType;
             node.DataPath = occurrence.DataPath;
             node.Props = properties;
+            node.Actions = ReadActions(occurrence.Definition, properties);
             node.Checks = checks;
             node.Signature = signature;
             next[occurrence.InstanceId] = node;
@@ -272,6 +298,15 @@ public sealed class NodeResolver : IDisposable
             return new(ResolvedPropertyKind.Action, null, false, null, []);
 
         return new(ResolvedPropertyKind.Value, value, false, null, []);
+    }
+
+    private static Dictionary<string, JsonElement> ReadActions(JsonElement definition, Dictionary<string, ResolvedProperty> properties)
+    {
+        var actions = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var (name, property) in properties)
+            if (property.Kind == ResolvedPropertyKind.Action)
+                actions[name] = definition.GetProperty(name);
+        return actions;
     }
 
     private static ResolvedProperty Binding(JsonElement? value, bool coerceBoolean, bool writable, string? path)

@@ -29,6 +29,8 @@ internal static class NodeCases
     internal static string ExclusionReason(JsonElement test, string assets)
     {
         var catalog = LoadFixture(test, assets).GetProperty("catalog").GetString()!;
+        if (test.GetProperty("name").GetString() == "invoke_action_with_dispatch_metadata")
+            return "The fixture declares component metadata as metadata. The pinned component schema defines @metadata and rejects it.";
         return catalog.Contains("v0_9_1", StringComparison.Ordinal)
             ? "The fixture loads the v0.9.1 basic catalog, which the pinned manifest does not import and the 1.0 profile excludes."
             : "The scenario needs envelope metadata, action invocation or function recording, which the node resolver does not implement.";
@@ -112,7 +114,7 @@ internal static class NodeCases
         Require(applyError is null, applyError?.ToString() ?? "Message was rejected.");
     }
 
-    private static bool JsonEquals(JsonElement left, JsonElement right)
+    internal static bool JsonEquals(JsonElement left, JsonElement right)
     {
         if (left.ValueKind != right.ValueKind)
             return false;
