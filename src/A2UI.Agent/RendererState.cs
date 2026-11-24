@@ -32,6 +32,10 @@ public sealed class RendererState : IDisposable
     /// <returns>The first validation diagnostic, or null on success.</returns>
     public A2uiDiagnostic? Prepare(IEnumerable<WireMessage> messages, out RendererTurn? turn,
         CancellationToken cancellationToken = default)
+        => Prepare(messages, out turn, null, true, cancellationToken);
+
+    internal A2uiDiagnostic? Prepare(IEnumerable<WireMessage> messages, out RendererTurn? turn,
+        IEnumerable<string>? affected, bool final, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(messages);
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -65,9 +69,14 @@ public sealed class RendererState : IDisposable
                 }
                 ordered.Add(message);
             }
-            foreach (var id in touched)
-                if (candidate.ValidateCompleteGraph(id, cancellationToken) is { } error)
-                    return error;
+            if (final)
+            {
+                if (affected is not null)
+                    touched.UnionWith(affected);
+                foreach (var id in touched)
+                    if (candidate.ValidateCompleteGraph(id, cancellationToken) is { } error)
+                        return error;
+            }
             cancellationToken.ThrowIfCancellationRequested();
             turn = new RendererTurn(this, revision, candidate, ordered.AsReadOnly());
             return null;

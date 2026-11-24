@@ -36,6 +36,8 @@ foreach (var suite in new[] { "core", "agent" })
                 ?? ReadString(document, "protocolVersion") ?? ReadString(document, "version");
             var runScaling = scaling && path == "conformance/core/message_processor_scaling.yaml" &&
                 id is "test_scaling_process_single_component_messages_relaxed_v10" or "test_scaling_process_single_component_messages_composition_v10";
+            var agentScaling = scaling && path == "conformance/agent/direct_json/scaling.yaml" &&
+                !id.EndsWith("_v09", StringComparison.Ordinal);
             string? reason = (isScaling != scaling, version, path) switch
             {
                 (true, _, _) => "Run mode excludes this case.",
@@ -44,7 +46,7 @@ foreach (var suite in new[] { "core", "agent" })
                 (_, _, "conformance/core/adapter_conformance.yaml") => "Renderer adapter is outside the headless profile.",
                 (_, _, "conformance/agent/direct_json/decompiler.yaml") when id == "test_decompile_json_catalog_qualified_components" =>
                     "Fixture uses bare catalogId on components without a default. Pinned 1.0 wire protocol requires @catalogId.",
-                _ when runScaling => null,
+                _ when runScaling || agentScaling => null,
                 (_, _, "conformance/core/message_processor_scaling.yaml") when id == "test_scaling_process_single_component_messages_v10" =>
                     "SurfaceSession requires topology validation and has no unchecked processing mode.",
                 _ when !scaling && CoreCases.Supports(path, id) => null,
@@ -53,6 +55,8 @@ foreach (var suite in new[] { "core", "agent" })
                 (_, _, "conformance/core/node_resolution.yaml") when NodeCases.Supports(id) => null,
                 (_, _, "conformance/core/node_resolution.yaml") => NodeCases.ExclusionReason(test, assets),
                 _ when !scaling && AgentCases.Supports(path, test) => null,
+                (_, _, "conformance/agent/direct_json/response_streaming.yaml") when test.GetProperty("args").GetRawText()
+                    .Contains("catalog_v0_", StringComparison.Ordinal) => "Legacy protocol is outside the profile.",
                 (_, _, "conformance/agent/catalog_transformer.yaml") when id == "test_function_pruning_on_catalog_without_functions" =>
                     "The source catalog fixture omits its ID. Registration requires a catalog identity before pruning.",
                 (_, _, "conformance/core/catalog.yaml") when id == "test_v10_catalog_from_json_v1_0_attributes" =>
@@ -85,7 +89,9 @@ foreach (var suite in new[] { "core", "agent" })
             {
                 try
                 {
-                    if (runScaling)
+                    if (agentScaling)
+                        Console.WriteLine($"{id} {AgentScaling.Run(test, assets)}");
+                    else if (runScaling)
                         Console.WriteLine($"{id} {CoreScaling.Run(test, assets)}");
                     else if (suite == "agent")
                         AgentCases.Run(test, assets);

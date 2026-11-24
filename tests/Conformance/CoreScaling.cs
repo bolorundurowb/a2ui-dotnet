@@ -65,7 +65,7 @@ internal static class CoreScaling
         return Stopwatch.GetElapsedTime(start).TotalMilliseconds;
     }
 
-    private static JsonElement Expand(JsonElement payload, int size)
+    internal static JsonElement Expand(JsonElement payload, int size)
     {
         var builder = new StringBuilder();
         foreach (var part in payload.EnumerateArray())
