@@ -13,7 +13,7 @@ public readonly record struct AgentFunctionOutcome(JsonElement Value, string? Er
 }
 
 /// <summary>A function call to the agent that did not return a value.</summary>
-/// <remarks>The <see cref="Code"/> is an agent error code, or one that the renderer sets: <c>TIMEOUT</c>, <c>CANCELLED</c>, <c>DUPLICATE</c>, <c>DISPOSED</c> or <c>NO_LISTENER</c>.</remarks>
+/// <remarks>The <see cref="Code"/> is an agent error code, or one that the renderer sets: <c>TIMEOUT</c>, <c>CANCELLED</c>, <c>DUPLICATE</c>, <c>PENDING_LIMIT</c>, <c>DISPOSED</c> or <c>NO_LISTENER</c>.</remarks>
 public sealed class AgentFunctionException : Exception
 {
     /// <summary>Creates the exception.</summary>
@@ -32,7 +32,7 @@ public sealed class AgentFunctionException : Exception
 /// <remarks>
 /// The client keeps one table of pending calls, so a response is matched by its <c>functionCallId</c> alone. The renderer sets
 /// these error codes: <c>NO_LISTENER</c> when the client has no way to send, <c>DUPLICATE</c> for a call identifier that is
-/// still pending, <c>DISPOSED</c> for a call after <see cref="Dispose"/>, <c>TIMEOUT</c> when the agent does not answer in
+/// still pending, <c>PENDING_LIMIT</c> when the configured capacity is reached, <c>DISPOSED</c> for a call after <see cref="Dispose"/>, <c>TIMEOUT</c> when the agent does not answer in
 /// time and <c>CANCELLED</c> when <see cref="CancelSurface"/> or <see cref="Dispose"/> ends a pending call. A response that
 /// matches no pending call is ignored, which covers answers that arrive after a timeout or cancellation.
 /// The client is safe to use from several threads. Completion callbacks run on the thread that completes the call, outside
@@ -44,13 +44,26 @@ public sealed class AgentFunctionClient : IDisposable
     private readonly TimeProvider _time;
     private readonly object _gate = new();
     private readonly Dictionary<string, PendingCall> _pending = new(StringComparer.Ordinal);
+    private readonly int _maxPendingCalls;
     private bool _disposed;
 
     /// <summary>Creates a client.</summary>
     /// <param name="send">Sends a message to the agent. A null value means the renderer has no way to reach the agent, so every call fails with <c>NO_LISTENER</c>.</param>
     /// <param name="timeProvider">The clock for call timeouts. Defaults to <see cref="TimeProvider.System"/>.</param>
     public AgentFunctionClient(Action<WireMessage>? send, TimeProvider? timeProvider = null)
+        : this(send, int.MaxValue, timeProvider)
     {
+    }
+
+    /// <summary>Creates a client with a limit on concurrent pending calls across its surfaces.</summary>
+    /// <param name="send">Sends a message to the agent. Null means there is no listener.</param>
+    /// <param name="maxPendingCalls">The maximum number of concurrent pending calls. Must be positive.</param>
+    /// <param name="timeProvider">The clock for call timeouts. Defaults to <see cref="TimeProvider.System"/>.</param>
+    /// <exception cref="ArgumentOutOfRangeException">The pending call limit is not positive.</exception>
+    public AgentFunctionClient(Action<WireMessage>? send, int maxPendingCalls, TimeProvider? timeProvider = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPendingCalls);
+        _maxPendingCalls = maxPendingCalls;
         _send = send;
         _time = timeProvider ?? TimeProvider.System;
     }
@@ -75,7 +88,7 @@ public sealed class AgentFunctionClient : IDisposable
     /// <param name="functionCallId">The identifier to correlate the response with. A new unique identifier is used when it is null.</param>
     /// <param name="timeout">How long to wait for the answer. A null value waits until the call is answered or cancelled.</param>
     /// <returns>The identifier of the call.</returns>
-    /// <exception cref="AgentFunctionException">The call was not sent. The code is <c>DISPOSED</c>, <c>NO_LISTENER</c> or <c>DUPLICATE</c>.</exception>
+    /// <exception cref="AgentFunctionException">The call was not sent. The code is <c>DISPOSED</c>, <c>NO_LISTENER</c>, <c>DUPLICATE</c> or <c>PENDING_LIMIT</c>.</exception>
     public string Send(string surfaceId, JsonElement callFunction, Action<AgentFunctionOutcome> completed,
         string? functionCallId = null, TimeSpan? timeout = null)
     {
@@ -91,11 +104,23 @@ public sealed class AgentFunctionClient : IDisposable
                 throw new AgentFunctionException("DISPOSED", "The client is disposed.");
             if (_send is null)
                 throw new AgentFunctionException("NO_LISTENER", "The renderer has no way to send messages to the agent.");
-            if (!_pending.TryAdd(id, call))
+            if (_pending.ContainsKey(id))
                 throw new AgentFunctionException("DUPLICATE", $"A call with functionCallId '{id}' is already pending.");
-            if (timeout is { } limit)
-                call.Timer = _time.CreateTimer(_ => Complete(id, Failure("TIMEOUT", "The agent did not answer in time.")),
-                    null, limit, Timeout.InfiniteTimeSpan);
+            if (_pending.Count >= _maxPendingCalls)
+                throw new AgentFunctionException("PENDING_LIMIT", "The renderer has reached its pending agent call limit.");
+
+            _pending.Add(id, call);
+            try
+            {
+                if (timeout is { } limit)
+                    call.Timer = _time.CreateTimer(_ => Complete(id, Failure("TIMEOUT", "The agent did not answer in time.")),
+                        null, limit, Timeout.InfiniteTimeSpan);
+            }
+            catch
+            {
+                _pending.Remove(id);
+                throw;
+            }
         }
 
         try

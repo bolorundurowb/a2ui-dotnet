@@ -537,25 +537,46 @@ internal static class CoreSmoke
                 "required":["@call","args"]},
               "boom":{"type":"object","returnType":"any","allowedCallers":"agentOnly",
                 "properties":{"@call":{"const":"boom"},"args":{"type":"object"}},"required":["@call","args"]},
-              "local":{"type":"object","returnType":"any",
+              "local":{"type":"object","returnType":"any","requiresUserActivation":true,
                 "properties":{"@call":{"const":"local"},"args":{"type":"object"}},"required":["@call","args"]}}}
             """;
         var host = new CatalogRegistry(includeBasicCatalog: false);
         Require(host.TryRegister(Encoding.UTF8.GetBytes(catalog), out var hostProblem), hostProblem);
+        // The pinned schema permits user activation only for renderer-only functions.
+        var invalidCatalog = catalog.Replace(
+            "\"requiresUserActivation\":true,", "\"requiresUserActivation\":true,\"allowedCallers\":\"agentOnly\",",
+            StringComparison.Ordinal);
+        var invalidRegistry = new CatalogRegistry(includeBasicCatalog: false);
+        Require(!invalidRegistry.TryRegister(Encoding.UTF8.GetBytes(invalidCatalog), out _));
         var hostFunctions = new FunctionEvaluator(host);
         hostFunctions.RegisterHostFunction("test:host", "ping", call =>
             JsonDocument.Parse("""{"pong":N}""".Replace("N", call.Args["n"].GetRawText(), StringComparison.Ordinal)).RootElement.Clone());
         hostFunctions.RegisterHostFunction("test:host", "boom", _ => throw new InvalidOperationException("secret"));
         var handler = new RendererFunctionHandler(host, hostFunctions);
-        JsonElement Call(string name, string args) => handler.Handle(Decode("""
+        JsonElement Call(string name, string args, bool userActivation = false) => handler.Handle(Decode("""
             {"version":"1.0","callRendererFunction":{"functionCallId":"r1","callFunction":{"@call":"NAME","catalogId":"test:host","args":ARGS}}}
-            """.Replace("NAME", name, StringComparison.Ordinal).Replace("ARGS", args, StringComparison.Ordinal))).Payload;
+            """.Replace("NAME", name, StringComparison.Ordinal).Replace("ARGS", args, StringComparison.Ordinal)), userActivation).Payload;
         Require(Call("ping", """{"n":2}""").GetProperty("value").GetProperty("pong").GetInt32() == 2);
         Require(Call("ping", """{"n":"x"}""").GetProperty("error").GetProperty("code").GetString() == "INVALID_FUNCTION_CALL");
         Require(Call("local", "{}").GetProperty("error").GetProperty("code").GetString() == "INVALID_FUNCTION_CALL");
+        Require(Call("local", "{}", userActivation: true).GetProperty("error").GetProperty("code").GetString() == "INVALID_FUNCTION_CALL");
         var boom = Call("boom", "{}").GetProperty("error");
         Require(boom.GetProperty("code").GetString() == "EXECUTION_ERROR" &&
             !boom.GetProperty("message").GetString()!.Contains("secret", StringComparison.Ordinal));
+
+        // The pending limit is shared across surfaces and completion makes room for the next call.
+        var limitedSent = new List<WireMessage>();
+        using var limited = new AgentFunctionClient(limitedSent.Add, maxPendingCalls: 1);
+        var function = request.GetProperty("callFunction");
+        var firstCall = limited.CallAsync("main", function, "first");
+        var refused = limited.CallAsync("another", function, "refused");
+        Require(refused.Exception?.InnerException is AgentFunctionException { Code: "PENDING_LIMIT" });
+        Require(limitedSent.Count == 1 && limited.PendingCount == 1);
+        Require(limited.TryHandleResponse(Decode(Answer("first", "\"value\":1"))));
+        Require(firstCall.GetAwaiter().GetResult().GetInt32() == 1);
+        var nextCall = limited.CallAsync("another", function, "next");
+        Require(limitedSent.Count == 2 && limited.CancelSurface("another") == 1);
+        Require(nextCall.Exception?.InnerException is AgentFunctionException { Code: "CANCELLED" });
 
         // A call that nobody answers times out, and a late answer is ignored.
         var timed = new List<WireMessage>();
