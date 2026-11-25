@@ -22,6 +22,8 @@ internal static class CoreCases
             "test_v10_uax31_astral_plane_identifier_accepted" or "test_v10_uax31_astral_non_identifier_component_type_error" or
             "test_v10_validate_component_metadata_invalid_extension_key_error") => true,
         ("conformance/core/message_processor_v1_0.yaml",
+            "test_v10_get_renderer_data_model_includes_surface_without_default" or
+            "test_v10_get_renderer_data_model_excludes_surface_without_default_from_v09" or
             "test_unsupported_protocol_version_error" or "test_v10_component_without_catalog_id_on_surface_without_default_errors" or
             "test_v10_component_without_catalog_id_errors_with_a_single_catalog" or
             "test_v10_update_components_metadata_extension_key_must_be_identifier" or
@@ -324,7 +326,7 @@ internal static class CoreCases
         {
             foreach (var step in steps.EnumerateArray())
                 RunStep(session, step, validate);
-            CheckSurfaces(session, test);
+            CheckState(session, test);
         }
         else
             RunStep(session, test, validate);
@@ -423,11 +425,21 @@ internal static class CoreCases
         }
 
         Require(diagnostic is null, diagnostic?.ToString() ?? "");
-        CheckSurfaces(session, step);
+        CheckState(session, step);
     }
 
-    private static void CheckSurfaces(SurfaceSession session, JsonElement step)
+    private static void CheckState(SurfaceSession session, JsonElement step)
     {
+        if (step.TryGetProperty("action", out var action) && action.ValueEquals("get_renderer_data_model"))
+        {
+            var version = step.GetProperty("args").GetProperty("version").GetString()!;
+            var model = session.GetRendererDataModel(version);
+            var expected = step.GetProperty("expect");
+            Require(model is null ? expected.ValueKind == JsonValueKind.Null : Equal(model.Value, expected),
+                "Renderer data model metadata differs.");
+            return;
+        }
+
         if (!step.TryGetProperty("expect", out var expect) || !expect.TryGetProperty("surfaces", out var surfaces))
             return;
         foreach (var surface in surfaces.EnumerateObject())

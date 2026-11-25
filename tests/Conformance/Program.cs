@@ -68,6 +68,9 @@ foreach (var suite in new[] { "core", "agent" })
                     "The fixture uses a function entry without type and properties. The pinned catalog schema requires both.",
                 (_, _, "conformance/core/validator_v1_0.yaml") when id == "test_v10_uax31_invalid_identifier_error" =>
                     "The fixture requires UAX #31 component IDs. The pinned common types schema defines ComponentId as a string.",
+                (_, _, "conformance/core/message_processor_v1_0.yaml")
+                    when id == "test_v10_get_renderer_data_model_filters_by_surface_protocol_version" =>
+                    "The fixture creates a v0.9 surface alongside a 1.0 surface. Core supports only 1.0.",
                 (_, _, "conformance/core/message_processor_v1_0.yaml") when id is
                     "test_v10_component_catalog_override" or "test_v10_components_naming_catalogs_on_surface_without_default" or
                     "test_v10_component_from_named_catalog_with_closed_schema_accepted" or
