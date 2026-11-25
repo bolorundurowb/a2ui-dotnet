@@ -22,6 +22,21 @@ The first turn negotiates capabilities, creates the form and sends separate comp
 | Agent macros | Catalog-aware expansion with scoped IDs, nested macros and shared Core validation. | Pending [#34](https://github.com/bolorundurowb/a2ui-dotnet/issues/34) and the pinned v1.0 macro cases. |
 | Trimming and Native AOT | Preserve support in the Core and Agent API design. Verify headless consumers for each claimed deployment target. | Windows x64 scaffold publish and execution passed for trimmed .NET 8 and Native AOT .NET 8 and 10. A trimmed .NET 8 Core package consumer and a .NET 8 Native AOT smoke application passed with the wire, catalog and surface APIs. Broader deployment verification is pending. |
 
+## Core catalog verification
+
+The Release run against upstream revision `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe` passed 489 Core and 247 Agent cases on .NET 8.0.14 for macOS arm64. It recorded 376 Core and 783 Agent exclusions, with no failures.
+
+| Coverage | Passed | Excluded |
+| --- | ---: | ---: |
+| A2UI 1.0 catalog loading, including metadata | 25 | 9 |
+| Mixed catalog fixtures | 2 | 6 |
+| Message processor catalog and function routing group | 19 | 9 |
+| Renderer capabilities, with and without inline catalogs | 2 | 0 |
+
+The published 1.0 Basic, MCP and VegaChart definitions load with their references resolved offline against the document and the embedded shared types. Bundled schema generation is tracked in [#67](https://github.com/bolorundurowb/a2ui-dotnet/issues/67). The conformance report records exclusions for legacy routing, abstract per-surface catalog selection, and fixtures that disagree with the pinned schema. For example, the function override fixture in `multi_catalog.yaml` references an undefined local `#/$defs/DynamicString`. The harness supplies the pinned `common_types.json#/$defs/DynamicString` reference and checks the resolved value through `NodeResolver`.
+
+The Core smoke check covers a Unicode component and function argument schema, rejection of an invalid argument name, a renderer function that requires user activation, and explicit component routing on a mixed catalog surface.
+
 ## Core state behavior
 
 `SurfaceSession` defaults to progressive topology validation for streamed updates. It accepts temporarily missing roots, forward references and orphans. Use `GraphValidationOptions.Strict` to require a complete reachable graph after each nonempty component batch. Both modes enforce composition, cycles and a 50-edge nesting limit before committing. A rejected operation preserves the previous snapshot and emits no change event.

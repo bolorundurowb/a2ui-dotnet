@@ -49,7 +49,8 @@ foreach (var suite in new[] { "core", "agent" })
                 _ when runScaling || agentScaling => null,
                 (_, _, "conformance/core/message_processor_scaling.yaml") when id == "test_scaling_process_single_component_messages_v10" =>
                     "SurfaceSession requires topology validation and has no unchecked processing mode.",
-                _ when !scaling && CoreCases.Supports(path, id) => null,
+                _ when CoreCases.CatalogExclusion(path, test, id) is { } catalogReason => catalogReason,
+                _ when !scaling && CoreCases.Supports(path, id, test) => null,
                 _ when !scaling && FunctionCases.Supports(path, test) => null,
                 _ when OutboundCases.Handles(path) && OutboundCases.ExclusionReason(path, id) is { } outboundReason => outboundReason,
                 _ when !scaling && OutboundCases.Handles(path) => null,
@@ -64,8 +65,6 @@ foreach (var suite in new[] { "core", "agent" })
                     .Contains("catalog_v0_", StringComparison.Ordinal) => "Legacy protocol is outside the profile.",
                 (_, _, "conformance/agent/catalog_transformer.yaml") when id == "test_function_pruning_on_catalog_without_functions" =>
                     "The source catalog fixture omits its ID. Registration requires a catalog identity before pruning.",
-                (_, _, "conformance/core/catalog.yaml") when id == "test_v10_catalog_from_json_v1_0_attributes" =>
-                    "The fixture uses a function entry without type and properties. The pinned catalog schema requires both.",
                 (_, _, "conformance/core/validator_v1_0.yaml") when id == "test_v10_uax31_invalid_identifier_error" =>
                     "The fixture requires UAX #31 component IDs. The pinned common types schema defines ComponentId as a string.",
                 (_, _, "conformance/core/message_processor_v1_0.yaml")

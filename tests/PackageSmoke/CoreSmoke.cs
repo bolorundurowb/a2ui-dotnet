@@ -11,6 +11,7 @@ internal static class CoreSmoke
         var registry = new CatalogRegistry();
         CheckOccurrences(registry);
         CheckSessionDisposal(registry);
+        CheckCatalogValidation();
         var custom = """
             {
               "catalogId":"test:cards","protocolVersion":"1.0",
@@ -137,6 +138,34 @@ internal static class CoreSmoke
 
     // Pins how the codec treats number text, absent members, explicit null and input ownership. Decode clears the
     // input buffer, so every read below also proves that the message does not borrow from its input.
+    private static void CheckCatalogValidation()
+    {
+        var registry = new CatalogRegistry();
+        const string definition = """
+            {"catalogId":"custom","protocolVersion":"1.0",
+             "components":{"Label_ℓ":{"type":"object","properties":{"property_ℓ":{"type":"string"}}}},
+             "functions":{"notify":{"type":"object","returnType":"void","requiresUserActivation":true,
+               "properties":{"@call":{"const":"notify"},"args":{"type":"object","properties":{"arg_ℓ":{"type":"string"}}}},
+               "required":["@call"]}}}
+            """;
+        Require(!registry.TryRegister(Encoding.UTF8.GetBytes(definition.Replace("arg_ℓ", "bad-arg", StringComparison.Ordinal)),
+            out var error) && error?.Code == "invalidCatalogItem" &&
+            error.Path == "/functions/notify/properties/args/properties/bad-arg", error);
+        Require(registry.TryRegister(Encoding.UTF8.GetBytes(definition), out error), error);
+
+        using var session = new SurfaceSession(registry, GraphValidationOptions.Strict);
+        Require(session.Apply(Decode($$$"""
+            {"version":"1.0","createSurface":{"surfaceId":"mixed","catalogId":"{{{CatalogRegistry.BasicCatalogId}}}",
+             "components":[{"id":"root","component":"Column","children":["custom"]},
+               {"id":"custom","component":"Label_ℓ","@catalogId":"custom","property_ℓ":"value"}]}}
+            """)) is null);
+        var rejection = session.Apply(Decode("""
+            {"version":"1.0","updateComponents":{"surfaceId":"mixed","components":[
+              {"id":"custom","component":"Label_ℓ","@catalogId":"missing","property_ℓ":"value"}]}}
+            """));
+        Require(rejection?.Code == "unknownCatalog", rejection);
+    }
+
     private static void CheckSessionDisposal(CatalogRegistry registry)
     {
         using var session = new SurfaceSession(registry);

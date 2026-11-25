@@ -258,7 +258,7 @@ public sealed class CatalogRegistry
     private void Add(JsonElement definition)
     {
         var id = definition.GetProperty("catalogId").GetString()!;
-        var validator = new SchemaValidator(ProtocolSchemas.Resolve, resolveFunction: ResolveFunction);
+        var validator = new SchemaValidator(ProtocolSchemas.Resolve, resolveFunction: ResolveFunction, hasCatalog: _catalogs.ContainsKey);
         _catalogs.Add(id, new(definition, validator));
     }
 
@@ -280,9 +280,35 @@ public sealed class CatalogRegistry
             return new("unknownCatalogItem", WireJson.Path("", nameKey), $"Catalog item '{name.GetString()}' is unavailable.");
 
         var common = ProtocolSchemas.Resolve("common_types.json")!.Value;
-        return group == "components"
+        var functionSchema = common.GetProperty("$defs").GetProperty("FunctionCall");
+        var problem = group == "components"
             ? catalog.Validator.ValidateComponent(value, schema, catalog.Definition, common, defaultCatalogId)
-            : catalog.Validator.Validate(value, common.GetProperty("$defs").GetProperty("FunctionCall"), common, defaultCatalogId);
+            : catalog.Validator.Validate(value, functionSchema, common, defaultCatalogId);
+        return problem ?? CheckNestedCalls(value, "", false);
+
+        A2uiDiagnostic? CheckNestedCalls(JsonElement current, string path, bool inArguments)
+        {
+            if (WireJson.IsObject(current))
+            {
+                var isCall = current.TryGetProperty("@call", out var call) && call.ValueKind == JsonValueKind.String;
+                if (inArguments && isCall &&
+                    catalog.Validator.Validate(current, functionSchema, common, defaultCatalogId) is { } failure)
+                    return failure with { Path = path + failure.Path };
+
+                foreach (var member in current.EnumerateObject())
+                    if (CheckNestedCalls(member.Value, WireJson.Path(path, member.Name),
+                        inArguments || isCall && member.NameEquals("args")) is { } nestedFailure)
+                        return nestedFailure;
+            }
+            else if (current.ValueKind == JsonValueKind.Array)
+            {
+                var index = 0;
+                foreach (var element in current.EnumerateArray())
+                    if (CheckNestedCalls(element, $"{path}/{index++}", inArguments) is { } nestedFailure)
+                        return nestedFailure;
+            }
+            return null;
+        }
     }
 
     private (JsonElement, JsonElement)? ResolveFunction(JsonElement function, string? defaultCatalogId)
@@ -317,9 +343,29 @@ public sealed class CatalogRegistry
             if (!WireJson.IsObject(items))
                 return new("invalidType", WireJson.Path("", group), "Expected a map of catalog schemas.");
             foreach (var item in items.EnumerateObject())
+            {
+                var path = WireJson.Path(WireJson.Path("", group), item.Name);
                 if (!SchemaValidator.IsIdentifier(item.Name) || !WireJson.IsObject(item.Value))
-                    return new("invalidCatalogItem", WireJson.Path(WireJson.Path("", group), item.Name),
-                        "Expected an identifier and an object schema.");
+                    return new("invalidCatalogItem", path, "Expected an identifier and an object schema.");
+
+                if (group == "components")
+                {
+                    if (CheckPropertyNames(item.Value, path) is { } problem)
+                        return problem;
+                    continue;
+                }
+
+                if (item.Value.TryGetProperty("requiresUserActivation", out var activation) &&
+                    activation.ValueKind == JsonValueKind.True &&
+                    item.Value.TryGetProperty("allowedCallers", out var callers) && !callers.ValueEquals("rendererOnly"))
+                    return new("invalidCatalogItem", path + "/requiresUserActivation",
+                        "Only renderer-only functions can require user activation.");
+
+                if (item.Value.TryGetProperty("properties", out var properties) && WireJson.IsObject(properties) &&
+                    properties.TryGetProperty("args", out var args) &&
+                    CheckPropertyNames(args, path + "/properties/args") is { } argumentProblem)
+                    return argumentProblem;
+            }
         }
 
         var meta = ProtocolSchemas.Resolve("catalog_definition.json")!.Value;
@@ -328,6 +374,28 @@ public sealed class CatalogRegistry
             return diagnostic;
         var schemaId = schemaIdentity.ValueKind == JsonValueKind.String ? schemaIdentity.GetString() : null;
         return CheckReferences(definition, definition, schemaId, "");
+    }
+
+    private static A2uiDiagnostic? CheckPropertyNames(JsonElement schema, string path)
+    {
+        if (!WireJson.IsObject(schema))
+            return null;
+
+        if (schema.TryGetProperty("properties", out var properties) && WireJson.IsObject(properties))
+            foreach (var property in properties.EnumerateObject())
+                if (!SchemaValidator.IsIdentifier(property.Name))
+                    return new("invalidCatalogItem", WireJson.Path(path + "/properties", property.Name),
+                        "Expected a UAX #31 identifier.");
+
+        foreach (var keyword in new[] { "allOf", "anyOf", "oneOf" })
+            if (schema.TryGetProperty(keyword, out var branches) && branches.ValueKind == JsonValueKind.Array)
+            {
+                var index = 0;
+                foreach (var branch in branches.EnumerateArray())
+                    if (CheckPropertyNames(branch, $"{path}/{keyword}/{index++}") is { } problem)
+                        return problem;
+            }
+        return null;
     }
 
     private static A2uiDiagnostic? CheckReferences(JsonElement value, JsonElement document, string? schemaId, string path)

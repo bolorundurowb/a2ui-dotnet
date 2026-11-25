@@ -7,7 +7,8 @@ namespace A2UI.Core;
 
 // Evaluates the subset used by the pinned protocol and Basic Catalog schemas.
 internal sealed class SchemaValidator(Func<string, JsonElement?> resolve, bool deferCatalogItems = false,
-    Func<JsonElement, string?, (JsonElement Document, JsonElement Schema)?>? resolveFunction = null)
+    Func<JsonElement, string?, (JsonElement Document, JsonElement Schema)?>? resolveFunction = null,
+    Func<string, bool>? hasCatalog = null)
 {
     internal A2uiDiagnostic? Validate(JsonElement instance, JsonElement schema, JsonElement document, string? surfaceCatalog = null) =>
         Evaluate(instance, schema, document, "", 0, surfaceCatalog).Error;
@@ -78,8 +79,13 @@ internal sealed class SchemaValidator(Func<string, JsonElement?> resolve, bool d
             else if (parts[0] == "catalog.json" && parts.Length == 2 &&
                 parts[1] == "/$defs/anyFunction" && resolveFunction is not null)
             {
+                if (value.TryGetProperty("catalogId", out var catalogId) && catalogId.ValueKind == JsonValueKind.String &&
+                    hasCatalog?.Invoke(catalogId.GetString()!) == false)
+                    return new(new A2uiDiagnostic("unknownCatalog", WireJson.Path(path, "catalogId"),
+                        $"Catalog not found: {catalogId.GetString()}"));
                 if (resolveFunction(value, surfaceCatalog) is not { } resolved)
-                    return Fail("unknownCatalogFunction", WireJson.Path(path, "@call"));
+                    return new(new A2uiDiagnostic("unknownCatalogFunction", WireJson.Path(path, "@call"),
+                        $"Unrecognized function '{value.GetProperty("@call").GetString()}'."));
                 var outcome = Evaluate(value, resolved.Schema, resolved.Document, path, depth + 1, surfaceCatalog);
                 if (outcome.Error is not null)
                     return outcome;
@@ -123,7 +129,8 @@ internal sealed class SchemaValidator(Func<string, JsonElement?> resolve, bool d
                 {
                     if (keyword == "allOf" || outcome.Error.Code is "unresolvedReference" or "schemaDepth")
                         return outcome;
-                    if (failure.Error is null || outcome.Error.Path.Length > failure.Error.Path.Length)
+                    if (failure.Error is null || outcome.Error.Code == "unknownCatalog" ||
+                        failure.Error.Code != "unknownCatalog" && outcome.Error.Path.Length > failure.Error.Path.Length)
                         failure = outcome;
                     continue;
                 }
