@@ -61,7 +61,16 @@ internal static class CoreCases
 
     internal static bool Supports(string file, string id, JsonElement test) => (file, id) switch
     {
-        ("conformance/core/expressions.yaml", _) => true,
+        ("conformance/core/expressions.yaml" or "conformance/core/composition_constraints.yaml", _) => true,
+        ("conformance/core/index_function.yaml", "test_index_function_outside_loop_error") => true,
+        ("conformance/core/message_processor_v1_0.yaml", "test_global_recursion_depth_limit_exceeded_error") => true,
+        ("conformance/core/validator_v1_0.yaml", "test_validator_1_0" or "test_custom_catalog_1_0" or
+            "test_v10_recursion_limit_function_call_depth_exceeded_error" or
+            "test_v10_recursion_limit_function_call_depth_at_limit" or
+            "test_v10_recursion_limit_function_call_depth_one_past_limit_error" or
+            "test_v10_data_model_nesting_depth_limit_exceeded_error" or
+            "test_v10_agent_only_function_in_binding_error" or "test_v10_agent_only_function_in_action_error" or
+            "test_v10_agent_only_function_cross_catalog_and_nested_error") => true,
         ("conformance/core/catalog.yaml", _) when test.GetProperty("action").ValueEquals("from_json") => true,
         ("conformance/core/multi_catalog.yaml", "test_multi_catalog_function_call_catalog_id_override" or
             "test_multi_catalog_version_mismatch_error") => true,
@@ -179,6 +188,8 @@ internal static class CoreCases
                 break;
             case "conformance/core/message_processor_v1_0.yaml":
             case "conformance/core/validator_v1_0.yaml":
+            case "conformance/core/composition_constraints.yaml":
+            case "conformance/core/index_function.yaml":
             case "conformance/core/data_model_pointers.yaml":
             case "conformance/core/data_deletion.yaml":
             case "conformance/core/reserved_keys.yaml":
@@ -296,6 +307,12 @@ internal static class CoreCases
                 if (!WireMessage.TryDecode(Encoding.UTF8.GetBytes(message), WireDirection.AgentToRenderer,
                         out var decoded, out diagnostic))
                     break;
+                if (definition == "IndexSystemFunction" && decoded!.Kind == "updateComponents")
+                {
+                    // This probe tests schema shape. The graph suite checks collection scope.
+                    diagnostic = registry.ValidateComponent(decoded.Payload.GetProperty("components")[0], "probe");
+                    break;
+                }
                 diagnostic = session.Apply(decoded!);
                 if (diagnostic is not null)
                     break;
@@ -308,9 +325,10 @@ internal static class CoreCases
             }
 
             Require(diagnostic is null, $"{definition} rejected {value}: {diagnostic}");
-            Require(session.TryGetSurface("s", out var surface) && surface is not null &&
-                Equal(surface.Components["root"].GetProperty("value"), step.GetProperty("value")),
-                $"The accepted {definition} value was not preserved.");
+            if (definition != "IndexSystemFunction")
+                Require(session.TryGetSurface("s", out var surface) && surface is not null &&
+                    Equal(surface.Components["root"].GetProperty("value"), step.GetProperty("value")),
+                    $"The accepted {definition} value was not preserved.");
         }
     }
 
@@ -467,14 +485,27 @@ internal static class CoreCases
 
     private static void RunLifecycle(JsonElement test, string assets)
     {
-        var registry = BuildRegistry(test, assets);
+        var isComposition = test.GetProperty("name").GetString()!.StartsWith("test_composition_", StringComparison.Ordinal);
+        var registry = BuildRegistry(test, assets, compositionFixture: isComposition);
         var strict = test.TryGetProperty("strictMode", out var strictMode) && strictMode.GetBoolean();
         var validate = test.TryGetProperty("action", out var action) && action.ValueEquals("validate");
-        using var session = new SurfaceSession(registry, strict ? GraphValidationOptions.Strict : GraphValidationOptions.Progressive);
+        var options = strict ? GraphValidationOptions.Strict : GraphValidationOptions.Progressive;
+        if (test.TryGetProperty("validationConfig", out var config))
+            options = new()
+            {
+                AllowMissingRoot = IsAllowed("allowMissingRoot"),
+                AllowDanglingReferences = IsAllowed("allowDanglingReferences"),
+                AllowOrphanComponents = IsAllowed("allowOrphanComponents")
+            };
+        using var session = new SurfaceSession(registry, options);
+        bool IsAllowed(string flag) => config.TryGetProperty(flag, out var enabled) && enabled.GetBoolean();
         if (test.TryGetProperty("steps", out var steps))
         {
+            var lastStep = steps.GetArrayLength() - 1;
+            var index = 0;
             foreach (var step in steps.EnumerateArray())
-                RunStep(session, step, validate);
+                RunStep(session, step, validate, index++ == lastStep && test.TryGetProperty("expectError", out var error)
+                    ? error : default);
             CheckState(session, test);
         }
         else
@@ -482,7 +513,7 @@ internal static class CoreCases
     }
 
     // The registry holds the pinned Basic Catalog under the aliases the fixtures use, plus any catalogs the case declares.
-    internal static CatalogRegistry BuildRegistry(JsonElement test, string assets, bool repairMixedCatalogReference = false)
+    internal static CatalogRegistry BuildRegistry(JsonElement test, string assets, bool repairMixedCatalogReference = false, bool compositionFixture = false)
     {
         var catalog = JsonNode.Parse(File.ReadAllBytes(Path.Combine(assets, "catalogs/basic/v1/catalog.json")))!;
         var registry = new CatalogRegistry();
@@ -495,8 +526,21 @@ internal static class CoreCases
                 error?.ToString() ?? "Catalog registration failed.");
         }
 
-        if (test.TryGetProperty("catalog", out var inline) && inline.TryGetProperty("catalogId", out _))
-            RegisterCatalog(registry, JsonNode.Parse(inline.GetRawText())!.AsObject());
+        if (test.TryGetProperty("catalog", out var inline))
+        {
+            if (inline.TryGetProperty("catalogSchema", out var nested))
+                inline = nested;
+            if (inline.TryGetProperty("catalogId", out _))
+            {
+                var definition = JsonNode.Parse(inline.GetRawText())!.AsObject();
+                if (compositionFixture)
+                    SupplyCompositionSchema(definition);
+                RegisterCatalog(registry, definition);
+            }
+        }
+        if (test.GetProperty("name").ValueEquals("test_v10_agent_only_function_cross_catalog_and_nested_error"))
+            RegisterCatalog(registry, JsonNode.Parse(File.ReadAllBytes(Path.Combine(assets,
+                "conformance/test_data/catalogs/allowed_callers_catalog_v1_0.json")))!.AsObject());
         if (test.TryGetProperty("catalogs", out var definitions) && definitions.ValueKind == JsonValueKind.Array)
             foreach (var definition in definitions.EnumerateArray())
                 if (definition.TryGetProperty("catalogId", out _))
@@ -513,6 +557,20 @@ internal static class CoreCases
         return registry;
     }
 
+    private static void SupplyCompositionSchema(JsonObject definition)
+    {
+        // Upstream's fixture adapter supplies the component discriminator and ChildList definition.
+        foreach (var (name, schema) in definition["components"]!.AsObject())
+        {
+            schema!["type"] ??= "object";
+            schema["properties"] ??= new JsonObject();
+            schema["properties"]!["component"] = new JsonObject { ["const"] = name };
+            if (schema["properties"]!["children"] is JsonObject children &&
+                children["$ref"]?.GetValue<string>() == "#/$defs/ChildList")
+                children["$ref"] = "common_types.json#/$defs/ChildList";
+        }
+    }
+
     private static void RegisterCatalog(CatalogRegistry registry, JsonObject definition)
     {
         definition["protocolVersion"] ??= WireMessage.Version;
@@ -520,7 +578,7 @@ internal static class CoreCases
             error?.ToString() ?? "Catalog registration failed.");
     }
 
-    private static void RunStep(SurfaceSession session, JsonElement step, bool validate)
+    private static void RunStep(SurfaceSession session, JsonElement step, bool validate, JsonElement error = default)
     {
         var messages = step.TryGetProperty("messages", out var batch) ? batch : step.GetProperty("payload");
         if (messages.ValueKind == JsonValueKind.Object)
@@ -553,12 +611,15 @@ internal static class CoreCases
             }
         }
 
-        if (step.TryGetProperty("expectError", out var error))
+        if (step.TryGetProperty("expectError", out var stepError))
+            error = stepError;
+        if (error.ValueKind != JsonValueKind.Undefined)
         {
             var category = diagnostic?.Code switch
             {
                 null => null,
-                "graphDepth" when validate => "RecursionError",
+                "graphDepth" or "functionCallDepth" or "dataModelDepth" or "componentValueDepth" when validate => "RecursionError",
+                "unallowedParent" or "unallowedChild" => "ValidationError",
                 "duplicateComponent" or "circularReference" or "missingRoot" or "orphanComponent" or "danglingReference" or
                     "unallowedParent" or "unallowedChild" or "graphDepth" when validate => "ValidationError",
                 "unknownSurface" or "duplicateSurface" or "duplicateComponent" or "circularReference" or "missingRoot" or
@@ -574,10 +635,30 @@ internal static class CoreCases
             else
             {
                 var expectedCategory = error.GetProperty("category").GetString();
-                // The pinned validator suite labels the same graph depth limit with two categories.
-                Require(category == expectedCategory || (diagnostic?.Code == "graphDepth" && validate &&
-                    expectedCategory == "ValidationError" && error.TryGetProperty("message", out var expectedMessage) &&
-                    expectedMessage.ValueEquals("Global recursion limit exceeded")), diagnostic?.ToString() ?? "Expected rejection.");
+                // The pinned validator fixtures use both categories for recursion failures.
+                Require(category == expectedCategory || (category == "RecursionError" && expectedCategory == "ValidationError"),
+                    diagnostic?.ToString() ?? "Expected rejection.");
+                if (error.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String)
+                    Require(RendererError.FromDiagnostic(diagnostic!).Code == code.GetString(), diagnostic!.ToString());
+                if (diagnostic?.Code is "unallowedChild" or "unallowedParent" && error.TryGetProperty("path", out var path))
+                    Require(RendererError.FromDiagnostic(diagnostic).Path == path.GetString(), diagnostic.ToString());
+                if (error.TryGetProperty("message", out var expected) && expected.GetString() is { } expectedText &&
+                    (expectedText is "Global recursion limit exceeded" or "functionCall depth" ||
+                     expectedText.StartsWith("@index function", StringComparison.Ordinal) ||
+                     expectedText.Contains("Allowed parents:", StringComparison.Ordinal) ||
+                     expectedText.Contains("Allowed children:", StringComparison.Ordinal) ||
+                     expectedText.Contains("is not reachable from", StringComparison.Ordinal)))
+                    Require(diagnostic?.Message.Contains(expectedText, StringComparison.OrdinalIgnoreCase) == true,
+                        diagnostic?.ToString() ?? "Expected rejection.");
+                if (error.TryGetProperty("rendererError", out var renderer) &&
+                    renderer.GetProperty("error") is var wireError &&
+                    wireError.TryGetProperty("message", out var rendererMessage) && rendererMessage.ValueEquals("agentOnly"))
+                {
+                    Require(diagnostic?.Code == "agentOnlyFunction", diagnostic?.ToString() ?? "Expected rejection.");
+                    var mapped = RendererError.FromDiagnostic(diagnostic!);
+                    Require(mapped.Path == wireError.GetProperty("path").GetString() &&
+                        mapped.Message.Contains("agentOnly", StringComparison.Ordinal), mapped.Message);
+                }
             }
             return;
         }
@@ -613,11 +694,13 @@ internal static class CoreCases
                 Require(Equal(snapshot.DataModel, data), "Data model differs.");
             if (surface.Value.TryGetProperty("components", out var components))
             {
-                Require(snapshot.Components.Count == components.GetArrayLength(), "Component count differs.");
-                foreach (var component in components.EnumerateArray())
+                var expectedComponents = components.ValueKind == JsonValueKind.Array
+                    ? components.EnumerateArray().Select(component => (component.GetProperty("id").GetString()!, component)).ToArray()
+                    : components.EnumerateObject().Select(component => (component.Name, component.Value)).ToArray();
+                Require(snapshot.Components.Count == expectedComponents.Length, "Component count differs.");
+                foreach (var (id, component) in expectedComponents)
                 {
-                    Require(snapshot.Components.TryGetValue(component.GetProperty("id").GetString()!, out var actual),
-                        "Missing component.");
+                    Require(snapshot.Components.TryGetValue(id, out var actual), "Missing component.");
                     foreach (var property in component.EnumerateObject())
                     {
                         var present = actual.TryGetProperty(property.Name, out var value);

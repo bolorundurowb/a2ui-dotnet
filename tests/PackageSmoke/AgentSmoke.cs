@@ -198,8 +198,37 @@ internal static class AgentSmoke
             throw new InvalidOperationException("The second turn did not close the form.");
     }
 
+    private static void CheckSkillExport()
+    {
+        var catalog = new CatalogRegistry();
+        if (DirectJsonPrompt.Create(catalog, out var prompt) is { } error)
+            throw new InvalidOperationException(error.ToString());
+
+        var directory = Directory.CreateTempSubdirectory("a2ui-skill-smoke-");
+        try
+        {
+            var skill = prompt!.ToSkillFile();
+            var path = Path.Combine(directory.FullName, skill.FileName);
+            var diagnostic = SkillSet.ExportToDirectory(directory.FullName, [skill]);
+            if (diagnostic is not null || File.ReadAllText(path) != prompt.ToSkill())
+                throw new InvalidOperationException(diagnostic?.ToString() ?? "The generated skill changed during export.");
+
+            var stale = Path.Combine(Path.GetDirectoryName(path)!, "stale.txt");
+            File.WriteAllText(stale, "old");
+            diagnostic = SkillSet.ExportToDirectory(directory.FullName, [skill]);
+            if (diagnostic is not null || File.Exists(stale) || File.ReadAllText(path) != skill.Content)
+                throw new InvalidOperationException(diagnostic?.ToString() ?? "Repeated export did not replace stale content.");
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+
+    }
+
     internal static void Run()
     {
+        CheckSkillExport();
         CheckDelivery();
         CheckInboundTurn();
         CheckStreaming();

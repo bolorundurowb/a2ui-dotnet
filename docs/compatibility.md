@@ -24,7 +24,7 @@ The first turn negotiates capabilities, creates the form and sends separate comp
 
 ## Core catalog verification
 
-The Release run against upstream revision `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe` passed 489 Core and 247 Agent cases on .NET 8.0.14 for macOS arm64. It recorded 376 Core and 783 Agent exclusions, with no failures.
+The Release run against upstream revision `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe` passed 510 Core and 251 Agent cases on .NET 8.0.34 for Windows x64. It recorded 355 Core and 779 Agent exclusions, with no failures. The Core run includes all ten composition cases, the additional validator and recursion cases, and the out-of-scope `@index` check. The Agent total includes all four skill export cases in `conformance/agent/skill.yaml`.
 
 | Coverage | Passed | Excluded |
 | --- | ---: | ---: |
@@ -43,13 +43,13 @@ Use `AgentFunctions.Register` to add host function declarations to the agent's c
 
 The renderer enforces any catalogue-declared user activation requirement before sending an agent function call. The host authenticates the renderer, isolates conversations and owns model retries, business side effects and storage.
 
-All 64 `agent_functions.yaml` cases pass against pinned revision `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe`, including argument defaults, catalogue selection, callback routing and validation of model output. The complete Windows x64 Release run on .NET 8.0.34 passed 489 Core and 311 Agent cases with 376 Core and 719 Agent exclusions and no failures. The clean Agent package smoke check opens a form, routes a returned action, serves an agent function and closes the form in the second turn.
+All 64 `agent_functions.yaml` cases pass against pinned revision `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe`, including argument defaults, catalogue selection, callback routing and validation of model output. The complete Windows x64 Release run on .NET 8.0.34 passed 510 Core and 315 Agent cases with 355 Core and 715 Agent exclusions and no failures. The clean Agent package smoke check opens a form, routes a returned action, serves an agent function and closes the form in the second turn.
 
 The pinned agent-functions catalogue fixture has no components and omits `$defs.anyComponent`. When populating a catalogue's schema unions, registration supplies a false union for an empty component set. The fixture's function declarations are kept intact. [Pinned catalogue fixture](https://github.com/a2ui-project/a2ui/blob/d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe/conformance/test_data/catalogs/agent_functions_catalog_v1_0.json)
 
 ## Core state behavior
 
-`SurfaceSession` defaults to progressive topology validation for streamed updates. It accepts temporarily missing roots, forward references and orphans. Use `GraphValidationOptions.Strict` to require a complete reachable graph after each nonempty component batch. Both modes enforce composition, cycles and a 50-edge nesting limit before committing. A rejected operation preserves the previous snapshot and emits no change event.
+`SurfaceSession` defaults to progressive topology validation for streamed updates. It accepts temporarily missing roots, forward references and orphans. Use `GraphValidationOptions.Strict` to require a complete reachable graph after each nonempty component batch. Both modes enforce composition, cycles and a 50-edge graph nesting limit before committing. Core also checks JSON container nesting in component values and data models, limits nested component function calls to five, and rejects renderer bindings or actions that call agent-only functions. A component with an explicit `@index` call may arrive before its parent in a progressive update. When the component is reachable from the root, every occurrence of it must be inside a collection template. A rejected operation preserves the previous snapshot and emits no change event.
 
 Hosts serialize calls into each session. Local `WriteData` calls and remote `updateDataModel` messages commit in call order, with the last successful write taking effect. Reads use immutable snapshots. A missing pointer returns false, and a stored JSON null returns true with a null value. A null write deletes an object member, leaves a null slot in an array, or resets the root to an empty object. Change events carry the committed snapshot and the write's pointer so consumers can refresh bindings that overlap it. Reentrant writes are rejected.
 
