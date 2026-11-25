@@ -20,6 +20,10 @@ public sealed class DirectJsonPrompt
     /// <returns>Markdown with skill frontmatter and the generated instructions.</returns>
     public string ToSkill() => "---\nname: a2ui-direct-json\ndescription: Generate A2UI 1.0 Direct JSON responses.\n---\n\n" + Text.Trim() + "\n";
 
+    /// <summary>Creates a file containing the generated monolithic skill.</summary>
+    /// <returns>The skill document and its default export path.</returns>
+    public SkillFile ToSkillFile() => new("a2ui-direct-json/SKILL.md", ToSkill());
+
     /// <summary>Creates a prompt for the active catalogs and validates its examples.</summary>
     /// <param name="catalogs">The active catalog definitions in negotiation order.</param>
     /// <param name="prompt">The rendered prompt on success.</param>

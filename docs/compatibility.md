@@ -24,7 +24,7 @@ The first turn negotiates capabilities, creates the form and sends separate comp
 
 ## Core catalog verification
 
-The Release run against upstream revision `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe` passed 489 Core and 247 Agent cases on .NET 8.0.14 for macOS arm64. It recorded 376 Core and 783 Agent exclusions, with no failures.
+The Release run against upstream revision `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe` passed 489 Core and 251 Agent cases on .NET 8.0.34 for Windows x64. It recorded 376 Core and 779 Agent exclusions, with no failures. The Agent total includes all four skill export cases in `conformance/agent/skill.yaml`.
 
 | Coverage | Passed | Excluded |
 | --- | ---: | ---: |
