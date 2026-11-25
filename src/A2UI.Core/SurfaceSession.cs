@@ -261,6 +261,8 @@ public sealed class SurfaceSession : IDisposable
                 return new("unknownCatalog", kindPath + "/catalogId", $"Catalog not found: {catalogId}");
             var send = payload.TryGetProperty("sendDataModel", out var sendFlag) && sendFlag.GetBoolean();
             var data = payload.TryGetProperty("dataModel", out var inlineData) ? inlineData : EmptyDataModel;
+            if (WireJson.ExceedsContainerDepth(data))
+                return new("dataModelDepth", kindPath + "/dataModel", "Global recursion limit exceeded.");
             snapshot = new(id, catalogId, send, data,
                 new ReadOnlyDictionary<string, JsonElement>(new Dictionary<string, JsonElement>(StringComparer.Ordinal)));
         }
@@ -314,8 +316,12 @@ public sealed class SurfaceSession : IDisposable
         if (DataPointer.TryParse(path, out var parsed) &&
             parsed.FirstOrDefault(segment => segment is "__proto__" or "constructor" or "prototype") is { } forbidden)
             return new("forbiddenPathKey", diagnosticPath, $"The path '{path}' uses the forbidden key '{forbidden}'.");
-        if (!DataPointer.TryParse(path, out var segments) ||
-            !DataPointer.TryUpdate(snapshot.DataModel, segments, value, out var result))
+        if (!DataPointer.TryParse(path, out var segments))
+            return new("invalidDataPath", diagnosticPath, "The data model cannot be updated at this pointer.");
+        if (value.ValueKind != JsonValueKind.Null &&
+            (segments.Length > WireJson.RecursionLimit + 1 || WireJson.ExceedsContainerDepth(value, segments.Length)))
+            return new("dataModelDepth", diagnosticPath, "Global recursion limit exceeded.");
+        if (!DataPointer.TryUpdate(snapshot.DataModel, segments, value, out var result))
             return new("invalidDataPath", diagnosticPath, "The data model cannot be updated at this pointer.");
 
         cancellationToken.ThrowIfCancellationRequested();

@@ -4,6 +4,19 @@ namespace A2UI.Core;
 
 internal static class WireJson
 {
+    internal const int RecursionLimit = 50;
+
+    internal static bool ExceedsContainerDepth(JsonElement value, int depth = 0)
+    {
+        if (IsObject(value))
+            return depth > RecursionLimit ||
+                value.EnumerateObject().Any(member => ExceedsContainerDepth(member.Value, depth + 1));
+        if (value.ValueKind == JsonValueKind.Array)
+            return depth > RecursionLimit ||
+                value.EnumerateArray().Any(item => ExceedsContainerDepth(item, depth + 1));
+        return false;
+    }
+
     internal static bool IsObject(JsonElement value) => value.ValueKind == JsonValueKind.Object;
 
     internal static string Path(string parent, string member) =>

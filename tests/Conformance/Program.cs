@@ -108,8 +108,7 @@ foreach (var suite in new[] { "core", "agent" })
                         RpcCases.Run(path, test);
                     else if (path == "conformance/core/node_resolution.yaml")
                         NodeCases.Run(test, assets);
-                    else if (path is "conformance/core/functions.yaml" or "conformance/core/validation_result.yaml"
-                        or "conformance/core/index_function.yaml")
+                    else if (FunctionCases.Supports(path, test))
                         FunctionCases.Run(assets, test);
                     else
                         CoreCases.Run(path, test, assets);

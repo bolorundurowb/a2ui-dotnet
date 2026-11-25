@@ -24,7 +24,7 @@ The first turn negotiates capabilities, creates the form and sends separate comp
 
 ## Core catalog verification
 
-The Release run against upstream revision `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe` passed 489 Core and 247 Agent cases on .NET 8.0.14 for macOS arm64. It recorded 376 Core and 783 Agent exclusions, with no failures.
+The Release run against upstream revision `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe` passed 510 Core and 247 Agent cases on Windows x64. It recorded 355 Core and 783 Agent exclusions, with no failures. The Core run includes all ten composition cases, the additional validator and recursion cases, and the out-of-scope `@index` check.
 
 | Coverage | Passed | Excluded |
 | --- | ---: | ---: |
@@ -39,7 +39,7 @@ The Core smoke check covers a Unicode component and function argument schema, re
 
 ## Core state behavior
 
-`SurfaceSession` defaults to progressive topology validation for streamed updates. It accepts temporarily missing roots, forward references and orphans. Use `GraphValidationOptions.Strict` to require a complete reachable graph after each nonempty component batch. Both modes enforce composition, cycles and a 50-edge nesting limit before committing. A rejected operation preserves the previous snapshot and emits no change event.
+`SurfaceSession` defaults to progressive topology validation for streamed updates. It accepts temporarily missing roots, forward references and orphans. Use `GraphValidationOptions.Strict` to require a complete reachable graph after each nonempty component batch. Both modes enforce composition, cycles and a 50-edge graph nesting limit before committing. Core also checks JSON container nesting in component values and data models, limits nested component function calls to five, and rejects renderer bindings or actions that call agent-only functions. A component with an explicit `@index` call may arrive before its parent in a progressive update. When the component is reachable from the root, every occurrence of it must be inside a collection template. A rejected operation preserves the previous snapshot and emits no change event.
 
 Hosts serialize calls into each session. Local `WriteData` calls and remote `updateDataModel` messages commit in call order, with the last successful write taking effect. Reads use immutable snapshots. A missing pointer returns false, and a stored JSON null returns true with a null value. A null write deletes an object member, leaves a null slot in an array, or resets the root to an empty object. Change events carry the committed snapshot and the write's pointer so consumers can refresh bindings that overlap it. Reentrant writes are rejected.
 

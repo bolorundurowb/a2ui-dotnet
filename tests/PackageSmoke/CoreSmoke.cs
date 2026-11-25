@@ -12,6 +12,7 @@ internal static class CoreSmoke
         CheckOccurrences(registry);
         CheckSessionDisposal(registry);
         CheckCatalogValidation();
+        CheckCandidateGraph();
         var custom = """
             {
               "catalogId":"test:cards","protocolVersion":"1.0",
@@ -164,6 +165,38 @@ internal static class CoreSmoke
               {"id":"custom","component":"Label_ℓ","@catalogId":"missing","property_ℓ":"value"}]}}
             """));
         Require(rejection?.Code == "unknownCatalog", rejection);
+    }
+
+    private static void CheckCandidateGraph()
+    {
+        var registry = new CatalogRegistry();
+        const string definition = """
+            {"catalogId":"test:rows","protocolVersion":"1.0","components":{"Label":
+              {"type":"object","properties":{"text":{"$ref":"common_types.json#/$defs/DynamicString"}}}}}
+            """;
+        Require(registry.TryRegister(Encoding.UTF8.GetBytes(definition), out var registration), registration);
+
+        using var session = new SurfaceSession(registry);
+        var notifications = 0;
+        session.Changed += _ => notifications++;
+        Require(session.Apply(Decode($$$"""
+            {"version":"1.0","createSurface":{"surfaceId":"graph","catalogId":"{{{CatalogRegistry.BasicCatalogId}}}",
+             "components":[{"id":"label","component":"Label","@catalogId":"test:rows","text":{"@call":"@index"}}]}}
+            """)) is null);
+        Require(session.Apply(Decode("""
+            {"version":"1.0","updateComponents":{"surfaceId":"graph","components":[
+              {"id":"root","component":"List","children":{"path":"/rows","componentId":"label"}}]}}
+            """)) is null);
+        Require(session.TryGetSurface("graph", out var before));
+
+        var rejection = session.Apply(Decode("""
+            {"version":"1.0","updateComponents":{"surfaceId":"graph","components":[
+              {"id":"root","component":"Column","children":["list","label"]},
+              {"id":"list","component":"List","children":{"path":"/rows","componentId":"label"}}]}}
+            """));
+        Require(rejection?.Code == "indexOutsideCollection", rejection);
+        Require(session.TryGetSurface("graph", out var after) && ReferenceEquals(before, after) &&
+            !after!.Components.ContainsKey("list") && notifications == 2);
     }
 
     private static void CheckSessionDisposal(CatalogRegistry registry)

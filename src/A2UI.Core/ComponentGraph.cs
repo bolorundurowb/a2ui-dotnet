@@ -31,6 +31,7 @@ internal static class ComponentGraph
         CancellationToken cancellationToken)
     {
         var nodes = new Dictionary<string, Node>(StringComparer.Ordinal);
+        var hasIndexCall = false;
         foreach (var (id, component) in snapshot.Components)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -40,24 +41,27 @@ internal static class ComponentGraph
                 return new("unknownCatalogItem", componentPath, "Component schema is unavailable.");
             var type = component.GetProperty("component").GetString()!;
             Collect(component, schema, document, componentPath, edges, 0, catalogs, snapshot.CatalogId);
-            nodes.Add(id, new(type, schema, edges, componentPath));
+            var indexCallPath = FindIndexCall(component);
+            hasIndexCall |= indexCallPath is not null;
+            nodes.Add(id, new(type, schema, edges, componentPath, indexCallPath));
         }
 
         var root = snapshot.RootComponentId;
         if (nodes.Count == 0)
             return null;
         if (nodes.TryGetValue(root, out var rootNode) && !Allows(rootNode.Schema, "allowedParents", "Surface"))
-            return new("unallowedParent", rootNode.Path, $"Component type '{rootNode.Type}' cannot be a child of Surface.");
-        foreach (var node in nodes.Values)
+            return DisallowedParent(root, rootNode, "Surface", "Surface");
+        foreach (var (id, node) in nodes)
         {
             foreach (var edge in node.Edges)
             {
                 if (nodes.TryGetValue(edge.Id, out var child))
                 {
                     if (!Allows(node.Schema, "allowedChildren", child.Type))
-                        return new("unallowedChild", edge.Path, $"Component type '{child.Type}' is not an allowed child of '{node.Type}'.");
+                        return new("unallowedChild", edge.Path, $"Container '{id}' ({node.Type}) cannot contain child " +
+                            $"'{edge.Id}' ({child.Type}). Allowed children: {AllowedTypes(node.Schema, "allowedChildren")}.");
                     if (!Allows(child.Schema, "allowedParents", node.Type))
-                        return new("unallowedParent", child.Path, $"Component type '{child.Type}' cannot be a child of '{node.Type}'.");
+                        return DisallowedParent(edge.Id, child, id, node.Type);
                 }
                 else if (!options.AllowDanglingReferences)
                     return new("danglingReference", edge.Path, $"Dangling reference to unavailable component {edge.Id}.");
@@ -74,9 +78,58 @@ internal static class ComponentGraph
             if (depths.ContainsKey(id))
                 continue;
             if (!options.AllowOrphanComponents)
-                return new("orphanComponent", node.Path, $"Component '{id}' is not reachable from the root.");
+                return new("orphanComponent", node.Path, $"Component '{id}' is not reachable from '{root}'.");
             if (Visit(id, nodes, depths, path, 0, cancellationToken) is { } orphanError)
                 return orphanError;
+        }
+        return hasIndexCall && rootNode is not null
+            ? ValidateIndexScope(root, nodes, new(StringComparer.Ordinal), cancellationToken)
+            : null;
+    }
+
+    private static A2uiDiagnostic DisallowedParent(string id, Node node, string parent, string parentType) =>
+        new("unallowedParent", node.Path, $"Component '{id}' ({node.Type}) cannot be placed under parent " +
+            $"'{parent}' ({parentType}). Allowed parents: {AllowedTypes(node.Schema, "allowedParents")}.");
+
+    private static string AllowedTypes(JsonElement schema, string rule) =>
+        "[" + string.Join(", ", schema.GetProperty(rule).EnumerateArray().Select(item => $"'{item.GetString()}'")) + "]";
+
+    private static A2uiDiagnostic? ValidateIndexScope(string id, Dictionary<string, Node> nodes,
+        HashSet<string> visited, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!nodes.TryGetValue(id, out var node) || !visited.Add(id))
+            return null;
+        if (node.IndexCallPath is { } path)
+            return new("indexOutsideCollection", node.Path + path,
+                "@index function can only be evaluated inside a collection template iteration scope.");
+        foreach (var edge in node.Edges)
+            if (edge.TemplatePath is null &&
+                ValidateIndexScope(edge.Id, nodes, visited, cancellationToken) is { } error)
+                return error;
+        return null;
+    }
+
+    private static string? FindIndexCall(JsonElement value)
+    {
+        if (WireJson.IsObject(value))
+        {
+            if (value.TryGetProperty("@call", out var call) &&
+                call.ValueKind == JsonValueKind.String && call.ValueEquals("@index"))
+                return "";
+            foreach (var property in value.EnumerateObject())
+                if (FindIndexCall(property.Value) is { } found)
+                    return WireJson.Path("", property.Name) + found;
+        }
+        else if (value.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+            foreach (var item in value.EnumerateArray())
+            {
+                if (FindIndexCall(item) is { } found)
+                    return $"/{index.ToString(CultureInfo.InvariantCulture)}{found}";
+                index++;
+            }
         }
         return null;
     }
@@ -85,13 +138,13 @@ internal static class ComponentGraph
         string path, int depth, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (depth > 50)
+        if (depth > WireJson.RecursionLimit)
             return new("graphDepth", path, "Global recursion limit exceeded.");
         if (depths.TryGetValue(id, out var cached))
         {
             if (cached < 0)
                 return new("circularReference", path, $"Circular component reference at '{id}'.");
-            return depth + cached > 50 ? new("graphDepth", path, "Global recursion limit exceeded.") : null;
+            return depth + cached > WireJson.RecursionLimit ? new("graphDepth", path, "Global recursion limit exceeded.") : null;
         }
 
         depths[id] = -1;
@@ -176,6 +229,6 @@ internal static class ComponentGraph
                         Collect(value, branch, document, path, edges, depth + 1, catalogs, surfaceCatalogId);
     }
 
-    private sealed record Node(string Type, JsonElement Schema, List<Edge> Edges, string Path);
+    private sealed record Node(string Type, JsonElement Schema, List<Edge> Edges, string Path, string? IndexCallPath);
     internal sealed record Edge(string Id, string Path, string? TemplatePath = null);
 }
