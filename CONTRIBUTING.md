@@ -24,7 +24,17 @@ dotnet build A2UI.slnx -c Release
 ./scripts/Get-UpstreamBaseline.ps1
 ```
 
-The smoke script packs both SDKs into a fresh local feed, restores each package in a clean consumer for every runtime, and publishes and runs each framework-dependent app. Agent consumers reference Agent alone and load Core through its package dependency. The outputs are under `artifacts/package-smoke/`. The [upstream guide](upstream/README.md) covers fixture provenance and refreshes.
+The smoke script packs both SDKs in Release into a fresh local feed. It checks the NuGet metadata, licences and upstream notices, XML documentation, portable symbols, and Source Link mapping to the Git commit. It restores each package in a clean consumer for every runtime, checks the restored dependency graph, and publishes and runs each framework-dependent app. Agent consumers reference Agent alone and restore the matching Core package. The outputs are under `artifacts/package-smoke/`.
+
+The shared `Version` in `src/Directory.Build.props` sets the NuGet package version for both SDKs using SemVer. Supported A2UI wire versions are recorded separately in the [compatibility matrix](docs/compatibility.md). Package name ownership, publishing credentials and checks against NuGet.org releases are part of the preview release.
+
+When intentionally changing the SDK API, regenerate the signature snapshots from the package consumer and review their diff alongside the source changes.
+
+```powershell
+./scripts/Test-SdkPackages.ps1 -UpdatePublicApi
+```
+
+The snapshots in `tests/PublicApi/` record public and protected signatures from the packaged assemblies on .NET 11. The regular smoke run compares the generated signatures with the checked-in files. The [upstream guide](upstream/README.md) covers fixture provenance and refreshes.
 
 ## Pinned conformance and schema comparison
 

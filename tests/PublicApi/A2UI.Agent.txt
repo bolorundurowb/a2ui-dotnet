@@ -1,0 +1,99 @@
+C A2UI.Agent.DirectJsonPart [Public, HideBySig, SpecialName, RTSpecialName] (System.String Content [None], System.Boolean IsPayload [Optional, HasDefault] = False, System.Boolean IsFinal [Optional, HasDefault] = True)
+C A2UI.Agent.DirectJsonResponsePart [Public, HideBySig, SpecialName, RTSpecialName] (System.String? Text [None], System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.WireMessage]? Messages [None])
+C A2UI.Agent.DirectJsonStream [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Agent.RendererState state [None], System.Collections.Generic.IEnumerable`1[T][System.String]? progressiveKeys [Optional, HasDefault] = , System.Boolean wrapped [Optional, HasDefault] = True, System.Boolean continueAfterRejectedBlock [Optional, HasDefault] = False, System.Int32 maxCharacters [Optional, HasDefault] = 1048576)
+C A2UI.Agent.RendererState [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Core.CatalogRegistry catalogs [None])
+C A2UI.Agent.StreamPart [Public, HideBySig, SpecialName, RTSpecialName] (System.String? Text [Optional, HasDefault] = , System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.WireMessage]? Messages [Optional, HasDefault] = , A2UI.Core.A2uiDiagnostic? Error [Optional, HasDefault] = )
+M A2UI.Agent.CatalogNegotiation.TryReadCapabilities [Public, Static, HideBySig] -> System.Boolean (System.Text.Json.JsonElement metadata [None], System.Text.Json.JsonElement& capabilities [Out], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
+M A2UI.Agent.CatalogNegotiation.TryResolve [Public, Static, HideBySig] -> System.Boolean (A2UI.Core.CatalogRegistry registered [None], System.Text.Json.JsonElement capabilities [None], System.Boolean acceptInlineCatalogs [None], A2UI.Core.CatalogRegistry?& active [Out], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
+M A2UI.Agent.DirectJson.Compile [Public, Static, HideBySig] -> A2UI.Core.A2uiDiagnostic? (System.String raw [None], A2UI.Core.CatalogRegistry catalogs [None], System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.WireMessage]& messages [Out])
+M A2UI.Agent.DirectJson.Decompile [Public, Static, HideBySig] -> System.String (System.Collections.Generic.IEnumerable`1[T][A2UI.Core.WireMessage] messages [None])
+M A2UI.Agent.DirectJson.ParseResponse [Public, Static, HideBySig] -> A2UI.Core.A2uiDiagnostic? (System.String response [None], A2UI.Agent.RendererState state [None], System.Collections.Generic.IReadOnlyList`1[T][A2UI.Agent.DirectJsonResponsePart]& parts [Out], A2UI.Agent.RendererTurn?& turn [Out], System.Boolean wrapped [Optional, HasDefault] = True, System.Threading.CancellationToken cancellationToken [Optional, HasDefault] = )
+M A2UI.Agent.DirectJson.Unwrap [Public, Static, HideBySig] -> System.Collections.Generic.IReadOnlyList`1[T][A2UI.Agent.DirectJsonPart] (System.String response [None])
+M A2UI.Agent.DirectJson.Wrap [Public, Static, HideBySig] -> System.String (System.Collections.Generic.IEnumerable`1[T][A2UI.Agent.DirectJsonPart] parts [None])
+M A2UI.Agent.DirectJsonPart.<Clone>$ [Public, HideBySig] -> A2UI.Agent.DirectJsonPart ()
+M A2UI.Agent.DirectJsonPart.Deconstruct [Public, HideBySig] -> System.Void (System.String& Content [Out], System.Boolean& IsPayload [Out], System.Boolean& IsFinal [Out])
+M A2UI.Agent.DirectJsonPart.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Agent.DirectJsonPart? other [None])
+M A2UI.Agent.DirectJsonPart.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object? obj [None])
+M A2UI.Agent.DirectJsonPart.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Agent.DirectJsonPart.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Agent.DirectJsonPart.get_Content [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Agent.DirectJsonPart.get_IsFinal [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Agent.DirectJsonPart.get_IsPayload [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Agent.DirectJsonPart.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Agent.DirectJsonPart? left [None], A2UI.Agent.DirectJsonPart? right [None])
+M A2UI.Agent.DirectJsonPart.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Agent.DirectJsonPart? left [None], A2UI.Agent.DirectJsonPart? right [None])
+M A2UI.Agent.DirectJsonPart.set_Content [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Agent.DirectJsonPart.set_IsFinal [Public, HideBySig, SpecialName] -> System.Void (System.Boolean value [None])
+M A2UI.Agent.DirectJsonPart.set_IsPayload [Public, HideBySig, SpecialName] -> System.Void (System.Boolean value [None])
+M A2UI.Agent.DirectJsonPrompt.Create [Public, Static, HideBySig] -> A2UI.Core.A2uiDiagnostic? (A2UI.Core.CatalogRegistry catalogs [None], A2UI.Agent.DirectJsonPrompt?& prompt [Out], System.Collections.Generic.IEnumerable`1[T][System.String]? examples [Optional, HasDefault] = , System.Collections.Generic.IEnumerable`1[T][System.String]? allowedMessages [Optional, HasDefault] = )
+M A2UI.Agent.DirectJsonPrompt.ToSkill [Public, HideBySig] -> System.String ()
+M A2UI.Agent.DirectJsonPrompt.get_Text [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Agent.DirectJsonResponsePart.<Clone>$ [Public, HideBySig] -> A2UI.Agent.DirectJsonResponsePart ()
+M A2UI.Agent.DirectJsonResponsePart.Deconstruct [Public, HideBySig] -> System.Void (System.String?& Text [Out], System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.WireMessage]?& Messages [Out])
+M A2UI.Agent.DirectJsonResponsePart.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Agent.DirectJsonResponsePart? other [None])
+M A2UI.Agent.DirectJsonResponsePart.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object? obj [None])
+M A2UI.Agent.DirectJsonResponsePart.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Agent.DirectJsonResponsePart.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Agent.DirectJsonResponsePart.get_Messages [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.WireMessage]? ()
+M A2UI.Agent.DirectJsonResponsePart.get_Text [Public, HideBySig, SpecialName] -> System.String? ()
+M A2UI.Agent.DirectJsonResponsePart.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Agent.DirectJsonResponsePart? left [None], A2UI.Agent.DirectJsonResponsePart? right [None])
+M A2UI.Agent.DirectJsonResponsePart.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Agent.DirectJsonResponsePart? left [None], A2UI.Agent.DirectJsonResponsePart? right [None])
+M A2UI.Agent.DirectJsonResponsePart.set_Messages [Public, HideBySig, SpecialName] -> System.Void (System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.WireMessage]? value [None])
+M A2UI.Agent.DirectJsonResponsePart.set_Text [Public, HideBySig, SpecialName] -> System.Void (System.String? value [None])
+M A2UI.Agent.DirectJsonStream.Read [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic? (System.String chunk [None], System.Collections.Generic.IReadOnlyList`1[T][A2UI.Agent.StreamPart]& parts [Out], System.Boolean final [Optional, HasDefault] = False, System.Threading.CancellationToken cancellationToken [Optional, HasDefault] = )
+M A2UI.Agent.DirectJsonStream.get_InBlock [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Agent.FileCatalogProvider.TryRegister [Public, Static, HideBySig] -> System.Boolean (A2UI.Core.CatalogRegistry registry [None], System.String path [None], System.String? catalogId [None], System.String? protocolVersion [None], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
+M A2UI.Agent.RendererState.Dispose [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Void ()
+M A2UI.Agent.RendererState.Prepare [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic? (System.Collections.Generic.IEnumerable`1[T][A2UI.Core.WireMessage] messages [None], A2UI.Agent.RendererTurn?& turn [Out], System.Threading.CancellationToken cancellationToken [Optional, HasDefault] = )
+M A2UI.Agent.RendererState.TryGetSurface [Public, HideBySig] -> System.Boolean (System.String id [None], A2UI.Core.SurfaceSnapshot?& snapshot [Out])
+M A2UI.Agent.RendererState.get_PendingDelivery [Public, HideBySig, SpecialName] -> A2UI.Agent.RendererTurn? ()
+M A2UI.Agent.RendererTurn.Acknowledge [Public, HideBySig] -> System.Void (A2UI.Core.WireMessage message [None])
+M A2UI.Agent.RendererTurn.Commit [Public, HideBySig] -> System.Void (System.Threading.CancellationToken cancellationToken [Optional, HasDefault] = )
+M A2UI.Agent.RendererTurn.Dispose [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Void ()
+M A2UI.Agent.RendererTurn.get_EmittedCount [Public, HideBySig, SpecialName] -> System.Int32 ()
+M A2UI.Agent.RendererTurn.get_NextMessage [Public, HideBySig, SpecialName] -> A2UI.Core.WireMessage? ()
+M A2UI.Agent.RequestProcessor.CreateSession [Public, HideBySig] -> A2UI.Agent.RendererState ()
+M A2UI.Agent.RequestProcessor.Fixed [Public, Static, HideBySig] -> A2UI.Core.A2uiDiagnostic? (A2UI.Core.CatalogRegistry registered [None], A2UI.Agent.RequestProcessor?& processor [Out], System.Collections.Generic.IEnumerable`1[T][System.String]? examples [Optional, HasDefault] = )
+M A2UI.Agent.RequestProcessor.Negotiate [Public, Static, HideBySig] -> A2UI.Core.A2uiDiagnostic? (A2UI.Core.CatalogRegistry registered [None], System.Text.Json.JsonElement capabilities [None], System.Boolean acceptInline [None], A2UI.Agent.RequestProcessor?& processor [Out], System.Collections.Generic.IEnumerable`1[T][System.String]? examples [Optional, HasDefault] = )
+M A2UI.Agent.RequestProcessor.TryGetCatalog [Public, HideBySig] -> System.Boolean (System.String id [None], System.Text.Json.JsonElement& definition [Out])
+M A2UI.Agent.RequestProcessor.get_CatalogIds [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyCollection`1[T][System.String] ()
+M A2UI.Agent.RequestProcessor.get_Prompt [Public, HideBySig, SpecialName] -> A2UI.Agent.DirectJsonPrompt ()
+M A2UI.Agent.StreamPart.<Clone>$ [Public, HideBySig] -> A2UI.Agent.StreamPart ()
+M A2UI.Agent.StreamPart.Deconstruct [Public, HideBySig] -> System.Void (System.String?& Text [Out], System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.WireMessage]?& Messages [Out], A2UI.Core.A2uiDiagnostic?& Error [Out])
+M A2UI.Agent.StreamPart.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Agent.StreamPart? other [None])
+M A2UI.Agent.StreamPart.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object? obj [None])
+M A2UI.Agent.StreamPart.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Agent.StreamPart.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Agent.StreamPart.get_Error [Public, HideBySig, SpecialName] -> A2UI.Core.A2uiDiagnostic? ()
+M A2UI.Agent.StreamPart.get_Messages [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.WireMessage]? ()
+M A2UI.Agent.StreamPart.get_Text [Public, HideBySig, SpecialName] -> System.String? ()
+M A2UI.Agent.StreamPart.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Agent.StreamPart? left [None], A2UI.Agent.StreamPart? right [None])
+M A2UI.Agent.StreamPart.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Agent.StreamPart? left [None], A2UI.Agent.StreamPart? right [None])
+M A2UI.Agent.StreamPart.set_Error [Public, HideBySig, SpecialName] -> System.Void (A2UI.Core.A2uiDiagnostic? value [None])
+M A2UI.Agent.StreamPart.set_Messages [Public, HideBySig, SpecialName] -> System.Void (System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.WireMessage]? value [None])
+M A2UI.Agent.StreamPart.set_Text [Public, HideBySig, SpecialName] -> System.Void (System.String? value [None])
+P A2UI.Agent.DirectJsonPart.Content : System.String () init
+P A2UI.Agent.DirectJsonPart.IsFinal : System.Boolean () init
+P A2UI.Agent.DirectJsonPart.IsPayload : System.Boolean () init
+P A2UI.Agent.DirectJsonPrompt.Text : System.String ()
+P A2UI.Agent.DirectJsonResponsePart.Messages : System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.WireMessage]? () init
+P A2UI.Agent.DirectJsonResponsePart.Text : System.String? () init
+P A2UI.Agent.DirectJsonStream.InBlock : System.Boolean ()
+P A2UI.Agent.RendererState.PendingDelivery : A2UI.Agent.RendererTurn? ()
+P A2UI.Agent.RendererTurn.EmittedCount : System.Int32 ()
+P A2UI.Agent.RendererTurn.NextMessage : A2UI.Core.WireMessage? ()
+P A2UI.Agent.RequestProcessor.CatalogIds : System.Collections.Generic.IReadOnlyCollection`1[T][System.String] ()
+P A2UI.Agent.RequestProcessor.Prompt : A2UI.Agent.DirectJsonPrompt ()
+P A2UI.Agent.StreamPart.Error : A2UI.Core.A2uiDiagnostic? () init
+P A2UI.Agent.StreamPart.Messages : System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.WireMessage]? () init
+P A2UI.Agent.StreamPart.Text : System.String? () init
+T A2UI.Agent.CatalogNegotiation [Public, Abstract, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Agent.DirectJson [Public, Abstract, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Agent.DirectJsonPart [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Agent.DirectJsonPart]]
+T A2UI.Agent.DirectJsonPrompt [Public, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Agent.DirectJsonResponsePart [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Agent.DirectJsonResponsePart]]
+T A2UI.Agent.DirectJsonStream [Public, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Agent.FileCatalogProvider [Public, Abstract, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Agent.RendererState [Public, Sealed, BeforeFieldInit] : System.Object [System.IDisposable]
+T A2UI.Agent.RendererTurn [Public, Sealed, BeforeFieldInit] : System.Object [System.IDisposable]
+T A2UI.Agent.RequestProcessor [Public, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Agent.StreamPart [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Agent.StreamPart]]

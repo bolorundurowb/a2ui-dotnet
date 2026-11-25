@@ -1,0 +1,459 @@
+C A2UI.Core.A2uiDiagnostic [Public, HideBySig, SpecialName, RTSpecialName] (System.String Code [None], System.String Path [None], System.String Message [None])
+C A2UI.Core.ActionDispatcher [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Core.FunctionEvaluator functions [None], System.TimeProvider? timeProvider [Optional, HasDefault] = )
+C A2UI.Core.ActionResult [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Core.WireMessage? Message [None], A2UI.Core.RendererError? Error [None])
+C A2UI.Core.AgentFunctionClient [Public, HideBySig, SpecialName, RTSpecialName] (System.Action`1[T][A2UI.Core.WireMessage]? send [None], System.Int32 maxPendingCalls [None], System.TimeProvider? timeProvider [Optional, HasDefault] = )
+C A2UI.Core.AgentFunctionClient [Public, HideBySig, SpecialName, RTSpecialName] (System.Action`1[T][A2UI.Core.WireMessage]? send [None], System.TimeProvider? timeProvider [Optional, HasDefault] = )
+C A2UI.Core.AgentFunctionException [Public, HideBySig, SpecialName, RTSpecialName] (System.String code [None], System.String message [None])
+C A2UI.Core.AgentFunctionOutcome [Public, HideBySig, SpecialName, RTSpecialName] (System.Text.Json.JsonElement Value [None], System.String? ErrorCode [None], System.String? ErrorMessage [None])
+C A2UI.Core.CatalogRegistry [Public, HideBySig, SpecialName, RTSpecialName] (System.Boolean includeBasicCatalog [Optional, HasDefault] = True)
+C A2UI.Core.CheckResult [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Core.CheckState State [None], A2UI.Core.ValidationResult? Result [None])
+C A2UI.Core.ComponentOccurrence [Public, HideBySig, SpecialName, RTSpecialName] (System.String InstanceId [None], System.String ComponentId [None], System.String ComponentType [None], System.String DataPath [None], System.Text.Json.JsonElement Definition [None], System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.ComponentOccurrence] Children [None], System.String Position [None])
+C A2UI.Core.FunctionCallRouter [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Core.SurfaceSession session [None], A2UI.Core.CatalogRegistry catalogs [None], A2UI.Core.FunctionEvaluator functions [None], A2UI.Core.AgentFunctionClient? agent [None], System.TimeProvider? timeProvider [Optional, HasDefault] = )
+C A2UI.Core.FunctionEvaluator [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Core.CatalogRegistry catalogs [None], System.Action`1[T][System.Uri]? openUrl [Optional, HasDefault] = )
+C A2UI.Core.GraphValidationOptions [Public, HideBySig, SpecialName, RTSpecialName] ()
+C A2UI.Core.HostFunction [Public, HideBySig, SpecialName, RTSpecialName] (System.Object object [None], System.IntPtr method [None])
+C A2UI.Core.HostFunctionCall [Public, HideBySig, SpecialName, RTSpecialName] (System.String CatalogId [None], System.String Name [None], System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, System.Text.Json.JsonElement] Args [None], System.String SurfaceId [None], System.Boolean UserInitiated [None])
+C A2UI.Core.NodeResolver [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Core.SurfaceSession session [None], A2UI.Core.CatalogRegistry catalogs [None], System.String surfaceId [None], A2UI.Core.FunctionEvaluator? functions [Optional, HasDefault] = , System.TimeProvider? timeProvider [Optional, HasDefault] = )
+C A2UI.Core.RendererError [Public, HideBySig, SpecialName, RTSpecialName] (System.String Category [None], System.String Code [None], System.String Message [None])
+C A2UI.Core.RendererFunctionHandler [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Core.CatalogRegistry catalogs [None], A2UI.Core.FunctionEvaluator functions [None], A2UI.Core.SurfaceSession? session [Optional, HasDefault] = )
+C A2UI.Core.ResolvedProperty [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Core.ResolvedPropertyKind Kind [None], System.Nullable`1[System.Text.Json.JsonElement] Value [None], System.Boolean Writable [None], System.String? BindingPath [None], System.Collections.Generic.IReadOnlyList`1[T][System.String] ChildPositions [None])
+C A2UI.Core.SurfaceChange [Public, HideBySig, SpecialName, RTSpecialName] (System.String Kind [None], System.String SurfaceId [None], A2UI.Core.SurfaceSnapshot? Snapshot [None])
+C A2UI.Core.SurfaceSession [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Core.CatalogRegistry catalogs [None])
+C A2UI.Core.SurfaceSession [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Core.CatalogRegistry catalogs [None], A2UI.Core.GraphValidationOptions graphValidation [None])
+C A2UI.Core.SurfaceSnapshot [Public, HideBySig, SpecialName, RTSpecialName] (System.String Id [None], System.String? CatalogId [None], System.Boolean SendDataModel [None], System.Text.Json.JsonElement DataModel [None], System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, System.Text.Json.JsonElement] Components [None])
+C A2UI.Core.ValidationResult [Public, HideBySig, SpecialName, RTSpecialName] (System.Boolean Valid [None], System.String? Code [None], System.String? Message [None], System.String Severity [None])
+E A2UI.Core.FunctionBinding.Changed : System.Action?
+E A2UI.Core.FunctionCallRouter.ActionDispatched : System.Action`1[T][A2UI.Core.WireMessage]?
+E A2UI.Core.FunctionCallRouter.ErrorReported : System.Action`1[T][A2UI.Core.RendererError]?
+E A2UI.Core.NodeResolver.NodeCreated : System.Action`1[T][A2UI.Core.ResolvedNode]?
+E A2UI.Core.NodeResolver.PropsChanged : System.Action`1[T][A2UI.Core.ResolvedNode]?
+E A2UI.Core.SurfaceSession.Changed : System.Action`1[T][A2UI.Core.SurfaceChange]?
+F A2UI.Core.CatalogRegistry.BasicCatalogId [Public, Static, Literal, HasDefault] : System.String = "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json"
+F A2UI.Core.CheckState.Invalid [Public, Static, Literal, HasDefault] : A2UI.Core.CheckState = 3
+F A2UI.Core.CheckState.Pending [Public, Static, Literal, HasDefault] : A2UI.Core.CheckState = 1
+F A2UI.Core.CheckState.Unresolved [Public, Static, Literal, HasDefault] : A2UI.Core.CheckState = 0
+F A2UI.Core.CheckState.Valid [Public, Static, Literal, HasDefault] : A2UI.Core.CheckState = 2
+F A2UI.Core.CheckState.value__ [Public, SpecialName, RTSpecialName] : System.Int32
+F A2UI.Core.ResolvedPropertyKind.Action [Public, Static, Literal, HasDefault] : A2UI.Core.ResolvedPropertyKind = 4
+F A2UI.Core.ResolvedPropertyKind.Binding [Public, Static, Literal, HasDefault] : A2UI.Core.ResolvedPropertyKind = 1
+F A2UI.Core.ResolvedPropertyKind.Child [Public, Static, Literal, HasDefault] : A2UI.Core.ResolvedPropertyKind = 2
+F A2UI.Core.ResolvedPropertyKind.Children [Public, Static, Literal, HasDefault] : A2UI.Core.ResolvedPropertyKind = 3
+F A2UI.Core.ResolvedPropertyKind.Value [Public, Static, Literal, HasDefault] : A2UI.Core.ResolvedPropertyKind = 0
+F A2UI.Core.ResolvedPropertyKind.value__ [Public, SpecialName, RTSpecialName] : System.Int32
+F A2UI.Core.WireDirection.AgentToRenderer [Public, Static, Literal, HasDefault] : A2UI.Core.WireDirection = 0
+F A2UI.Core.WireDirection.RendererToAgent [Public, Static, Literal, HasDefault] : A2UI.Core.WireDirection = 1
+F A2UI.Core.WireDirection.value__ [Public, SpecialName, RTSpecialName] : System.Int32
+F A2UI.Core.WireMessage.Version [Public, Static, Literal, HasDefault] : System.String = "1.0"
+F A2UI.Core.WireMetadataKind.AgentCapabilities [Public, Static, Literal, HasDefault] : A2UI.Core.WireMetadataKind = 0
+F A2UI.Core.WireMetadataKind.RendererCapabilities [Public, Static, Literal, HasDefault] : A2UI.Core.WireMetadataKind = 1
+F A2UI.Core.WireMetadataKind.RendererDataModel [Public, Static, Literal, HasDefault] : A2UI.Core.WireMetadataKind = 2
+F A2UI.Core.WireMetadataKind.value__ [Public, SpecialName, RTSpecialName] : System.Int32
+M A2UI.Core.A2uiDiagnostic.<Clone>$ [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic ()
+M A2UI.Core.A2uiDiagnostic.Deconstruct [Public, HideBySig] -> System.Void (System.String& Code [Out], System.String& Path [Out], System.String& Message [Out])
+M A2UI.Core.A2uiDiagnostic.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Core.A2uiDiagnostic? other [None])
+M A2UI.Core.A2uiDiagnostic.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object? obj [None])
+M A2UI.Core.A2uiDiagnostic.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Core.A2uiDiagnostic.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Core.A2uiDiagnostic.get_Code [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.A2uiDiagnostic.get_Message [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.A2uiDiagnostic.get_Path [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.A2uiDiagnostic.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.A2uiDiagnostic? left [None], A2UI.Core.A2uiDiagnostic? right [None])
+M A2UI.Core.A2uiDiagnostic.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.A2uiDiagnostic? left [None], A2UI.Core.A2uiDiagnostic? right [None])
+M A2UI.Core.A2uiDiagnostic.set_Code [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.A2uiDiagnostic.set_Message [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.A2uiDiagnostic.set_Path [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.ActionDispatcher.Dispatch [Public, HideBySig] -> A2UI.Core.ActionResult (A2UI.Core.SurfaceSnapshot surface [None], System.String sourceComponentId [None], System.String dataPath [None], System.Text.Json.JsonElement action [None], System.Boolean userInitiated [Optional, HasDefault] = True, System.Nullable`1[System.Text.Json.JsonElement] metadata [Optional, HasDefault] = )
+M A2UI.Core.ActionResult.<Clone>$ [Public, HideBySig] -> A2UI.Core.ActionResult ()
+M A2UI.Core.ActionResult.Deconstruct [Public, HideBySig] -> System.Void (A2UI.Core.WireMessage?& Message [Out], A2UI.Core.RendererError?& Error [Out])
+M A2UI.Core.ActionResult.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Core.ActionResult? other [None])
+M A2UI.Core.ActionResult.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object? obj [None])
+M A2UI.Core.ActionResult.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Core.ActionResult.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Core.ActionResult.get_Error [Public, HideBySig, SpecialName] -> A2UI.Core.RendererError? ()
+M A2UI.Core.ActionResult.get_Message [Public, HideBySig, SpecialName] -> A2UI.Core.WireMessage? ()
+M A2UI.Core.ActionResult.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.ActionResult? left [None], A2UI.Core.ActionResult? right [None])
+M A2UI.Core.ActionResult.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.ActionResult? left [None], A2UI.Core.ActionResult? right [None])
+M A2UI.Core.ActionResult.set_Error [Public, HideBySig, SpecialName] -> System.Void (A2UI.Core.RendererError? value [None])
+M A2UI.Core.ActionResult.set_Message [Public, HideBySig, SpecialName] -> System.Void (A2UI.Core.WireMessage? value [None])
+M A2UI.Core.AgentFunctionClient.CallAsync [Public, HideBySig] -> System.Threading.Tasks.Task`1[TResult][System.Text.Json.JsonElement] (System.String surfaceId [None], System.Text.Json.JsonElement callFunction [None], System.String? functionCallId [Optional, HasDefault] = , System.Nullable`1[System.TimeSpan] timeout [Optional, HasDefault] = , System.Threading.CancellationToken cancellationToken [Optional, HasDefault] = )
+M A2UI.Core.AgentFunctionClient.CancelSurface [Public, HideBySig] -> System.Int32 (System.String surfaceId [None])
+M A2UI.Core.AgentFunctionClient.Dispose [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Void ()
+M A2UI.Core.AgentFunctionClient.Send [Public, HideBySig] -> System.String (System.String surfaceId [None], System.Text.Json.JsonElement callFunction [None], System.Action`1[T][A2UI.Core.AgentFunctionOutcome] completed [None], System.String? functionCallId [Optional, HasDefault] = , System.Nullable`1[System.TimeSpan] timeout [Optional, HasDefault] = )
+M A2UI.Core.AgentFunctionClient.TryHandleResponse [Public, HideBySig] -> System.Boolean (A2UI.Core.WireMessage response [None])
+M A2UI.Core.AgentFunctionClient.get_CanSend [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Core.AgentFunctionClient.get_PendingCount [Public, HideBySig, SpecialName] -> System.Int32 ()
+M A2UI.Core.AgentFunctionException.get_Code [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.AgentFunctionOutcome.Deconstruct [Public, HideBySig] -> System.Void (System.Text.Json.JsonElement& Value [Out], System.String?& ErrorCode [Out], System.String?& ErrorMessage [Out])
+M A2UI.Core.AgentFunctionOutcome.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Core.AgentFunctionOutcome other [None])
+M A2UI.Core.AgentFunctionOutcome.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object obj [None])
+M A2UI.Core.AgentFunctionOutcome.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Core.AgentFunctionOutcome.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Core.AgentFunctionOutcome.get_ErrorCode [Public, HideBySig, SpecialName] -> System.String? ()
+M A2UI.Core.AgentFunctionOutcome.get_ErrorMessage [Public, HideBySig, SpecialName] -> System.String? ()
+M A2UI.Core.AgentFunctionOutcome.get_Succeeded [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Core.AgentFunctionOutcome.get_Value [Public, HideBySig, SpecialName] -> System.Text.Json.JsonElement ()
+M A2UI.Core.AgentFunctionOutcome.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.AgentFunctionOutcome left [None], A2UI.Core.AgentFunctionOutcome right [None])
+M A2UI.Core.AgentFunctionOutcome.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.AgentFunctionOutcome left [None], A2UI.Core.AgentFunctionOutcome right [None])
+M A2UI.Core.AgentFunctionOutcome.set_ErrorCode [Public, HideBySig, SpecialName] -> System.Void (System.String? value [None])
+M A2UI.Core.AgentFunctionOutcome.set_ErrorMessage [Public, HideBySig, SpecialName] -> System.Void (System.String? value [None])
+M A2UI.Core.AgentFunctionOutcome.set_Value [Public, HideBySig, SpecialName] -> System.Void (System.Text.Json.JsonElement value [None])
+M A2UI.Core.BasicFunctions.TryInvoke [Public, Static, HideBySig] -> System.Boolean (System.String name [None], System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, System.Text.Json.JsonElement] args [None], System.Text.Json.JsonElement& result [Out], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
+M A2UI.Core.BasicFunctions.get_Names [Public, Static, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyCollection`1[T][System.String] ()
+M A2UI.Core.CatalogRegistry.CreateRendererCapabilities [Public, HideBySig] -> A2UI.Core.WireMetadata (System.Boolean includeInlineCatalogs [Optional, HasDefault] = False)
+M A2UI.Core.CatalogRegistry.Remove [Public, HideBySig] -> System.Boolean (System.String catalogId [None])
+M A2UI.Core.CatalogRegistry.TryDerive [Public, HideBySig] -> System.Boolean (System.String sourceId [None], System.String catalogId [None], System.Collections.Generic.IEnumerable`1[T][System.String]? components [None], System.Collections.Generic.IEnumerable`1[T][System.String]? functions [None], System.String? instructions [None], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
+M A2UI.Core.CatalogRegistry.TryGetDefinition [Public, HideBySig] -> System.Boolean (System.String catalogId [None], System.Text.Json.JsonElement& definition [Out])
+M A2UI.Core.CatalogRegistry.TryRegister [Public, HideBySig] -> System.Boolean (System.ReadOnlyMemory`1[T][System.Byte] utf8 [None], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
+M A2UI.Core.CatalogRegistry.TryRegister [Public, HideBySig] -> System.Boolean (System.ReadOnlyMemory`1[T][System.Byte] utf8 [None], System.Collections.Generic.IEnumerable`1[T][System.String]? components [None], System.Collections.Generic.IEnumerable`1[T][System.String]? functions [None], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
+M A2UI.Core.CatalogRegistry.TryRegisterInline [Public, HideBySig] -> System.Boolean (System.ReadOnlyMemory`1[T][System.Byte] utf8 [None], System.Boolean allowInlineCatalogs [None], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
+M A2UI.Core.CatalogRegistry.ValidateComponent [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic? (System.Text.Json.JsonElement component [None], System.String? defaultCatalogId [None])
+M A2UI.Core.CatalogRegistry.ValidateFunction [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic? (System.Text.Json.JsonElement function [None], System.String? defaultCatalogId [None])
+M A2UI.Core.CatalogRegistry.get_CatalogIds [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyCollection`1[T][System.String] ()
+M A2UI.Core.CheckResult.<Clone>$ [Public, HideBySig] -> A2UI.Core.CheckResult ()
+M A2UI.Core.CheckResult.Deconstruct [Public, HideBySig] -> System.Void (A2UI.Core.CheckState& State [Out], A2UI.Core.ValidationResult?& Result [Out])
+M A2UI.Core.CheckResult.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Core.CheckResult? other [None])
+M A2UI.Core.CheckResult.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object? obj [None])
+M A2UI.Core.CheckResult.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Core.CheckResult.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Core.CheckResult.get_Result [Public, HideBySig, SpecialName] -> A2UI.Core.ValidationResult? ()
+M A2UI.Core.CheckResult.get_State [Public, HideBySig, SpecialName] -> A2UI.Core.CheckState ()
+M A2UI.Core.CheckResult.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.CheckResult? left [None], A2UI.Core.CheckResult? right [None])
+M A2UI.Core.CheckResult.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.CheckResult? left [None], A2UI.Core.CheckResult? right [None])
+M A2UI.Core.CheckResult.set_Result [Public, HideBySig, SpecialName] -> System.Void (A2UI.Core.ValidationResult? value [None])
+M A2UI.Core.CheckResult.set_State [Public, HideBySig, SpecialName] -> System.Void (A2UI.Core.CheckState value [None])
+M A2UI.Core.ComponentOccurrence.<Clone>$ [Public, HideBySig] -> A2UI.Core.ComponentOccurrence ()
+M A2UI.Core.ComponentOccurrence.Deconstruct [Public, HideBySig] -> System.Void (System.String& InstanceId [Out], System.String& ComponentId [Out], System.String& ComponentType [Out], System.String& DataPath [Out], System.Text.Json.JsonElement& Definition [Out], System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.ComponentOccurrence]& Children [Out], System.String& Position [Out])
+M A2UI.Core.ComponentOccurrence.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Core.ComponentOccurrence? other [None])
+M A2UI.Core.ComponentOccurrence.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object? obj [None])
+M A2UI.Core.ComponentOccurrence.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Core.ComponentOccurrence.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Core.ComponentOccurrence.get_Children [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.ComponentOccurrence] ()
+M A2UI.Core.ComponentOccurrence.get_ComponentId [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.ComponentOccurrence.get_ComponentType [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.ComponentOccurrence.get_DataPath [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.ComponentOccurrence.get_Definition [Public, HideBySig, SpecialName] -> System.Text.Json.JsonElement ()
+M A2UI.Core.ComponentOccurrence.get_InstanceId [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.ComponentOccurrence.get_Position [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.ComponentOccurrence.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.ComponentOccurrence? left [None], A2UI.Core.ComponentOccurrence? right [None])
+M A2UI.Core.ComponentOccurrence.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.ComponentOccurrence? left [None], A2UI.Core.ComponentOccurrence? right [None])
+M A2UI.Core.ComponentOccurrence.set_Children [Public, HideBySig, SpecialName] -> System.Void (System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.ComponentOccurrence] value [None])
+M A2UI.Core.ComponentOccurrence.set_ComponentId [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.ComponentOccurrence.set_ComponentType [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.ComponentOccurrence.set_DataPath [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.ComponentOccurrence.set_Definition [Public, HideBySig, SpecialName] -> System.Void (System.Text.Json.JsonElement value [None])
+M A2UI.Core.ComponentOccurrence.set_InstanceId [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.ComponentOccurrence.set_Position [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.ExpressionTemplate.TryEvaluate [Public, Static, HideBySig] -> System.Boolean (System.String template [None], System.Text.Json.JsonElement dataModel [None], System.Text.Json.JsonElement scope [None], System.String? catalogId [None], System.Func`4[T1,T2,T3,TResult][System.String?, System.String, System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, System.Text.Json.JsonElement], System.Text.Json.JsonElement]? invoke [None], System.String?& result [Out], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
+M A2UI.Core.ExpressionTemplate.TryParse [Public, Static, HideBySig] -> System.Boolean (System.String template [None], System.Text.Json.JsonElement& parts [Out], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
+M A2UI.Core.FunctionBinding.Dispose [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Void ()
+M A2UI.Core.FunctionBinding.add_Changed [Public, HideBySig, SpecialName] -> System.Void (System.Action? value [None])
+M A2UI.Core.FunctionBinding.get_HasFailed [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Core.FunctionBinding.get_IsPending [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Core.FunctionBinding.get_Passes [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Core.FunctionBinding.get_Value [Public, HideBySig, SpecialName] -> System.Text.Json.JsonElement ()
+M A2UI.Core.FunctionBinding.remove_Changed [Public, HideBySig, SpecialName] -> System.Void (System.Action? value [None])
+M A2UI.Core.FunctionCallRouter.Bind [Public, HideBySig] -> A2UI.Core.FunctionBinding (System.String surfaceId [None], System.String dataPath [None], System.Text.Json.JsonElement expression [None])
+M A2UI.Core.FunctionCallRouter.CancelPendingCalls [Public, HideBySig] -> System.Int32 (System.String surfaceId [None])
+M A2UI.Core.FunctionCallRouter.Dispose [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Void ()
+M A2UI.Core.FunctionCallRouter.Invoke [Public, HideBySig] -> System.Void (System.String surfaceId [None], System.String sourceComponentId [None], System.String dataPath [None], System.Text.Json.JsonElement action [None], System.Boolean userInitiated [Optional, HasDefault] = True, System.Nullable`1[System.Text.Json.JsonElement] metadata [Optional, HasDefault] = )
+M A2UI.Core.FunctionCallRouter.InvokeFunctionAction [Public, HideBySig] -> System.Void (System.String surfaceId [None], System.String sourceComponentId [None], System.String dataPath [None], System.Text.Json.JsonElement action [None], System.Action`1[T][System.Text.Json.JsonElement] completed [None], System.Boolean userInitiated [Optional, HasDefault] = True)
+M A2UI.Core.FunctionCallRouter.ReceiveResponse [Public, HideBySig] -> System.Boolean (A2UI.Core.WireMessage response [None])
+M A2UI.Core.FunctionCallRouter.add_ActionDispatched [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.WireMessage]? value [None])
+M A2UI.Core.FunctionCallRouter.add_ErrorReported [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.RendererError]? value [None])
+M A2UI.Core.FunctionCallRouter.remove_ActionDispatched [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.WireMessage]? value [None])
+M A2UI.Core.FunctionCallRouter.remove_ErrorReported [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.RendererError]? value [None])
+M A2UI.Core.FunctionEvaluator.RegisterHostFunction [Public, HideBySig] -> System.Void (System.String catalogId [None], System.String name [None], A2UI.Core.HostFunction implementation [None])
+M A2UI.Core.FunctionEvaluator.TryEvaluate [Public, HideBySig] -> System.Boolean (A2UI.Core.SurfaceSnapshot surface [None], System.String dataPath [None], System.Text.Json.JsonElement call [None], System.Boolean userInitiated [None], System.Text.Json.JsonElement& value [Out], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
+M A2UI.Core.FunctionEvaluator.TryResolveValue [Public, HideBySig] -> System.Boolean (A2UI.Core.SurfaceSnapshot surface [None], System.String dataPath [None], System.Text.Json.JsonElement value [None], System.Boolean userInitiated [None], System.Text.Json.JsonElement& resolved [Out], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
+M A2UI.Core.GraphValidationOptions.<Clone>$ [Public, HideBySig] -> A2UI.Core.GraphValidationOptions ()
+M A2UI.Core.GraphValidationOptions.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Core.GraphValidationOptions? other [None])
+M A2UI.Core.GraphValidationOptions.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object? obj [None])
+M A2UI.Core.GraphValidationOptions.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Core.GraphValidationOptions.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Core.GraphValidationOptions.get_AllowDanglingReferences [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Core.GraphValidationOptions.get_AllowMissingRoot [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Core.GraphValidationOptions.get_AllowOrphanComponents [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Core.GraphValidationOptions.get_Progressive [Public, Static, HideBySig, SpecialName] -> A2UI.Core.GraphValidationOptions ()
+M A2UI.Core.GraphValidationOptions.get_Strict [Public, Static, HideBySig, SpecialName] -> A2UI.Core.GraphValidationOptions ()
+M A2UI.Core.GraphValidationOptions.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.GraphValidationOptions? left [None], A2UI.Core.GraphValidationOptions? right [None])
+M A2UI.Core.GraphValidationOptions.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.GraphValidationOptions? left [None], A2UI.Core.GraphValidationOptions? right [None])
+M A2UI.Core.GraphValidationOptions.set_AllowDanglingReferences [Public, HideBySig, SpecialName] -> System.Void (System.Boolean value [None])
+M A2UI.Core.GraphValidationOptions.set_AllowMissingRoot [Public, HideBySig, SpecialName] -> System.Void (System.Boolean value [None])
+M A2UI.Core.GraphValidationOptions.set_AllowOrphanComponents [Public, HideBySig, SpecialName] -> System.Void (System.Boolean value [None])
+M A2UI.Core.HostFunction.BeginInvoke [Public, Virtual, HideBySig, VtableLayoutMask] -> System.IAsyncResult (A2UI.Core.HostFunctionCall call [None], System.AsyncCallback callback [None], System.Object object [None])
+M A2UI.Core.HostFunction.EndInvoke [Public, Virtual, HideBySig, VtableLayoutMask] -> System.Text.Json.JsonElement (System.IAsyncResult result [None])
+M A2UI.Core.HostFunction.Invoke [Public, Virtual, HideBySig, VtableLayoutMask] -> System.Text.Json.JsonElement (A2UI.Core.HostFunctionCall call [None])
+M A2UI.Core.HostFunctionCall.<Clone>$ [Public, HideBySig] -> A2UI.Core.HostFunctionCall ()
+M A2UI.Core.HostFunctionCall.Deconstruct [Public, HideBySig] -> System.Void (System.String& CatalogId [Out], System.String& Name [Out], System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, System.Text.Json.JsonElement]& Args [Out], System.String& SurfaceId [Out], System.Boolean& UserInitiated [Out])
+M A2UI.Core.HostFunctionCall.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Core.HostFunctionCall? other [None])
+M A2UI.Core.HostFunctionCall.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object? obj [None])
+M A2UI.Core.HostFunctionCall.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Core.HostFunctionCall.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Core.HostFunctionCall.get_Args [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, System.Text.Json.JsonElement] ()
+M A2UI.Core.HostFunctionCall.get_CatalogId [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.HostFunctionCall.get_Name [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.HostFunctionCall.get_SurfaceId [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.HostFunctionCall.get_UserInitiated [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Core.HostFunctionCall.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.HostFunctionCall? left [None], A2UI.Core.HostFunctionCall? right [None])
+M A2UI.Core.HostFunctionCall.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.HostFunctionCall? left [None], A2UI.Core.HostFunctionCall? right [None])
+M A2UI.Core.HostFunctionCall.set_Args [Public, HideBySig, SpecialName] -> System.Void (System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, System.Text.Json.JsonElement] value [None])
+M A2UI.Core.HostFunctionCall.set_CatalogId [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.HostFunctionCall.set_Name [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.HostFunctionCall.set_SurfaceId [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.HostFunctionCall.set_UserInitiated [Public, HideBySig, SpecialName] -> System.Void (System.Boolean value [None])
+M A2UI.Core.NodeResolver.Dispose [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Void ()
+M A2UI.Core.NodeResolver.Invoke [Public, HideBySig] -> A2UI.Core.ActionResult (A2UI.Core.ResolvedNode node [None], System.String property [None], System.Boolean userInitiated [Optional, HasDefault] = True, System.Nullable`1[System.Text.Json.JsonElement] metadata [Optional, HasDefault] = )
+M A2UI.Core.NodeResolver.Write [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic? (A2UI.Core.ResolvedNode node [None], System.String property [None], System.Text.Json.JsonElement value [None])
+M A2UI.Core.NodeResolver.add_NodeCreated [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.ResolvedNode]? value [None])
+M A2UI.Core.NodeResolver.add_PropsChanged [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.ResolvedNode]? value [None])
+M A2UI.Core.NodeResolver.get_Nodes [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.ResolvedNode] ()
+M A2UI.Core.NodeResolver.remove_NodeCreated [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.ResolvedNode]? value [None])
+M A2UI.Core.NodeResolver.remove_PropsChanged [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.ResolvedNode]? value [None])
+M A2UI.Core.ProtocolSchemas.get_AgentToRenderer [Public, Static, HideBySig, SpecialName] -> System.Text.Json.JsonElement ()
+M A2UI.Core.ProtocolSchemas.get_CommonTypes [Public, Static, HideBySig, SpecialName] -> System.Text.Json.JsonElement ()
+M A2UI.Core.RendererError.<Clone>$ [Public, HideBySig] -> A2UI.Core.RendererError ()
+M A2UI.Core.RendererError.Deconstruct [Public, HideBySig] -> System.Void (System.String& Category [Out], System.String& Code [Out], System.String& Message [Out])
+M A2UI.Core.RendererError.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Core.RendererError? other [None])
+M A2UI.Core.RendererError.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object? obj [None])
+M A2UI.Core.RendererError.FromDiagnostic [Public, Static, HideBySig] -> A2UI.Core.RendererError (A2UI.Core.A2uiDiagnostic diagnostic [None], System.String? surfaceId [Optional, HasDefault] = , System.String? functionCallId [Optional, HasDefault] = )
+M A2UI.Core.RendererError.FromRejectedEnvelope [Public, Static, HideBySig] -> A2UI.Core.RendererError (System.ReadOnlyMemory`1[T][System.Byte] utf8 [None], A2UI.Core.A2uiDiagnostic diagnostic [None])
+M A2UI.Core.RendererError.FromRejectedMessage [Public, Static, HideBySig] -> A2UI.Core.RendererError (A2UI.Core.WireMessage message [None], A2UI.Core.A2uiDiagnostic diagnostic [None])
+M A2UI.Core.RendererError.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Core.RendererError.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Core.RendererError.ToWireMessage [Public, HideBySig] -> A2UI.Core.WireMessage ()
+M A2UI.Core.RendererError.get_Category [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.RendererError.get_Code [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.RendererError.get_FunctionCallId [Public, HideBySig, SpecialName] -> System.String? ()
+M A2UI.Core.RendererError.get_Message [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.RendererError.get_Path [Public, HideBySig, SpecialName] -> System.String? ()
+M A2UI.Core.RendererError.get_SurfaceId [Public, HideBySig, SpecialName] -> System.String? ()
+M A2UI.Core.RendererError.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.RendererError? left [None], A2UI.Core.RendererError? right [None])
+M A2UI.Core.RendererError.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.RendererError? left [None], A2UI.Core.RendererError? right [None])
+M A2UI.Core.RendererError.set_Category [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.RendererError.set_Code [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.RendererError.set_FunctionCallId [Public, HideBySig, SpecialName] -> System.Void (System.String? value [None])
+M A2UI.Core.RendererError.set_Message [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.RendererError.set_Path [Public, HideBySig, SpecialName] -> System.Void (System.String? value [None])
+M A2UI.Core.RendererError.set_SurfaceId [Public, HideBySig, SpecialName] -> System.Void (System.String? value [None])
+M A2UI.Core.RendererFunctionHandler.Handle [Public, HideBySig] -> A2UI.Core.WireMessage (A2UI.Core.WireMessage call [None], System.Boolean userActivation [Optional, HasDefault] = False)
+M A2UI.Core.ResolvedNode.get_BlockingResult [Public, HideBySig, SpecialName] -> A2UI.Core.ValidationResult? ()
+M A2UI.Core.ResolvedNode.get_Checks [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.CheckResult] ()
+M A2UI.Core.ResolvedNode.get_ComponentId [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.ResolvedNode.get_ComponentType [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.ResolvedNode.get_DataPath [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.ResolvedNode.get_InstanceId [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.ResolvedNode.get_IsValid [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Core.ResolvedNode.get_Position [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.ResolvedNode.get_Props [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, A2UI.Core.ResolvedProperty] ()
+M A2UI.Core.ResolvedNode.get_ValidationErrors [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyList`1[T][System.String] ()
+M A2UI.Core.ResolvedNode.get_ValidationResults [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.ValidationResult] ()
+M A2UI.Core.ResolvedProperty.<Clone>$ [Public, HideBySig] -> A2UI.Core.ResolvedProperty ()
+M A2UI.Core.ResolvedProperty.Deconstruct [Public, HideBySig] -> System.Void (A2UI.Core.ResolvedPropertyKind& Kind [Out], System.Nullable`1[System.Text.Json.JsonElement]& Value [Out], System.Boolean& Writable [Out], System.String?& BindingPath [Out], System.Collections.Generic.IReadOnlyList`1[T][System.String]& ChildPositions [Out])
+M A2UI.Core.ResolvedProperty.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Core.ResolvedProperty? other [None])
+M A2UI.Core.ResolvedProperty.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object? obj [None])
+M A2UI.Core.ResolvedProperty.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Core.ResolvedProperty.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Core.ResolvedProperty.get_BindingPath [Public, HideBySig, SpecialName] -> System.String? ()
+M A2UI.Core.ResolvedProperty.get_ChildPositions [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyList`1[T][System.String] ()
+M A2UI.Core.ResolvedProperty.get_Kind [Public, HideBySig, SpecialName] -> A2UI.Core.ResolvedPropertyKind ()
+M A2UI.Core.ResolvedProperty.get_Value [Public, HideBySig, SpecialName] -> System.Nullable`1[System.Text.Json.JsonElement] ()
+M A2UI.Core.ResolvedProperty.get_Writable [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Core.ResolvedProperty.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.ResolvedProperty? left [None], A2UI.Core.ResolvedProperty? right [None])
+M A2UI.Core.ResolvedProperty.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.ResolvedProperty? left [None], A2UI.Core.ResolvedProperty? right [None])
+M A2UI.Core.ResolvedProperty.set_BindingPath [Public, HideBySig, SpecialName] -> System.Void (System.String? value [None])
+M A2UI.Core.ResolvedProperty.set_ChildPositions [Public, HideBySig, SpecialName] -> System.Void (System.Collections.Generic.IReadOnlyList`1[T][System.String] value [None])
+M A2UI.Core.ResolvedProperty.set_Kind [Public, HideBySig, SpecialName] -> System.Void (A2UI.Core.ResolvedPropertyKind value [None])
+M A2UI.Core.ResolvedProperty.set_Value [Public, HideBySig, SpecialName] -> System.Void (System.Nullable`1[System.Text.Json.JsonElement] value [None])
+M A2UI.Core.ResolvedProperty.set_Writable [Public, HideBySig, SpecialName] -> System.Void (System.Boolean value [None])
+M A2UI.Core.SurfaceChange.<Clone>$ [Public, HideBySig] -> A2UI.Core.SurfaceChange ()
+M A2UI.Core.SurfaceChange.Deconstruct [Public, HideBySig] -> System.Void (System.String& Kind [Out], System.String& SurfaceId [Out], A2UI.Core.SurfaceSnapshot?& Snapshot [Out])
+M A2UI.Core.SurfaceChange.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Core.SurfaceChange? other [None])
+M A2UI.Core.SurfaceChange.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object? obj [None])
+M A2UI.Core.SurfaceChange.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Core.SurfaceChange.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Core.SurfaceChange.get_DataPath [Public, HideBySig, SpecialName] -> System.String? ()
+M A2UI.Core.SurfaceChange.get_Kind [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.SurfaceChange.get_Snapshot [Public, HideBySig, SpecialName] -> A2UI.Core.SurfaceSnapshot? ()
+M A2UI.Core.SurfaceChange.get_SurfaceId [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.SurfaceChange.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.SurfaceChange? left [None], A2UI.Core.SurfaceChange? right [None])
+M A2UI.Core.SurfaceChange.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.SurfaceChange? left [None], A2UI.Core.SurfaceChange? right [None])
+M A2UI.Core.SurfaceChange.set_DataPath [Public, HideBySig, SpecialName] -> System.Void (System.String? value [None])
+M A2UI.Core.SurfaceChange.set_Kind [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.SurfaceChange.set_Snapshot [Public, HideBySig, SpecialName] -> System.Void (A2UI.Core.SurfaceSnapshot? value [None])
+M A2UI.Core.SurfaceChange.set_SurfaceId [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.SurfaceSession.Apply [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic? (A2UI.Core.WireMessage message [None], System.Threading.CancellationToken cancellationToken [Optional, HasDefault] = )
+M A2UI.Core.SurfaceSession.Dispose [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Void ()
+M A2UI.Core.SurfaceSession.Fork [Public, HideBySig] -> A2UI.Core.SurfaceSession ()
+M A2UI.Core.SurfaceSession.GetComponentOccurrences [Public, HideBySig] -> A2UI.Core.ComponentOccurrence? (System.String surfaceId [None], System.Int32 maxOccurrences [Optional, HasDefault] = 10000, System.Threading.CancellationToken cancellationToken [Optional, HasDefault] = )
+M A2UI.Core.SurfaceSession.GetRendererDataModel [Public, HideBySig] -> A2UI.Core.WireMetadata? ()
+M A2UI.Core.SurfaceSession.GetRendererDataModel [Public, HideBySig] -> A2UI.Core.WireMetadata? (System.String protocolVersion [None])
+M A2UI.Core.SurfaceSession.TryGetSurface [Public, HideBySig] -> System.Boolean (System.String id [None], A2UI.Core.SurfaceSnapshot?& snapshot [Out])
+M A2UI.Core.SurfaceSession.ValidateCompleteGraph [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic? (System.String surfaceId [None], System.Threading.CancellationToken cancellationToken [Optional, HasDefault] = )
+M A2UI.Core.SurfaceSession.WriteData [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic? (System.String surfaceId [None], System.String path [None], System.Text.Json.JsonElement value [None], System.Threading.CancellationToken cancellationToken [Optional, HasDefault] = )
+M A2UI.Core.SurfaceSession.WriteScopedData [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic? (System.String surfaceId [None], System.String scope [None], System.String path [None], System.Text.Json.JsonElement value [None], System.Threading.CancellationToken cancellationToken [Optional, HasDefault] = )
+M A2UI.Core.SurfaceSession.add_Changed [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.SurfaceChange]? value [None])
+M A2UI.Core.SurfaceSession.remove_Changed [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.SurfaceChange]? value [None])
+M A2UI.Core.SurfaceSnapshot.<Clone>$ [Public, HideBySig] -> A2UI.Core.SurfaceSnapshot ()
+M A2UI.Core.SurfaceSnapshot.Deconstruct [Public, HideBySig] -> System.Void (System.String& Id [Out], System.String?& CatalogId [Out], System.Boolean& SendDataModel [Out], System.Text.Json.JsonElement& DataModel [Out], System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, System.Text.Json.JsonElement]& Components [Out])
+M A2UI.Core.SurfaceSnapshot.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Core.SurfaceSnapshot? other [None])
+M A2UI.Core.SurfaceSnapshot.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object? obj [None])
+M A2UI.Core.SurfaceSnapshot.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Core.SurfaceSnapshot.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Core.SurfaceSnapshot.TryGetData [Public, HideBySig] -> System.Boolean (System.String path [None], System.Text.Json.JsonElement& value [Out])
+M A2UI.Core.SurfaceSnapshot.TryGetScopedData [Public, HideBySig] -> System.Boolean (System.String scope [None], System.String path [None], System.Text.Json.JsonElement& value [Out])
+M A2UI.Core.SurfaceSnapshot.get_CatalogId [Public, HideBySig, SpecialName] -> System.String? ()
+M A2UI.Core.SurfaceSnapshot.get_Components [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, System.Text.Json.JsonElement] ()
+M A2UI.Core.SurfaceSnapshot.get_Container [Public, HideBySig, SpecialName] -> System.Text.Json.JsonElement ()
+M A2UI.Core.SurfaceSnapshot.get_DataModel [Public, HideBySig, SpecialName] -> System.Text.Json.JsonElement ()
+M A2UI.Core.SurfaceSnapshot.get_Id [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.SurfaceSnapshot.get_RootComponentId [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.SurfaceSnapshot.get_SendDataModel [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Core.SurfaceSnapshot.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.SurfaceSnapshot? left [None], A2UI.Core.SurfaceSnapshot? right [None])
+M A2UI.Core.SurfaceSnapshot.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.SurfaceSnapshot? left [None], A2UI.Core.SurfaceSnapshot? right [None])
+M A2UI.Core.SurfaceSnapshot.set_CatalogId [Public, HideBySig, SpecialName] -> System.Void (System.String? value [None])
+M A2UI.Core.SurfaceSnapshot.set_Components [Public, HideBySig, SpecialName] -> System.Void (System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, System.Text.Json.JsonElement] value [None])
+M A2UI.Core.SurfaceSnapshot.set_DataModel [Public, HideBySig, SpecialName] -> System.Void (System.Text.Json.JsonElement value [None])
+M A2UI.Core.SurfaceSnapshot.set_Id [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.SurfaceSnapshot.set_SendDataModel [Public, HideBySig, SpecialName] -> System.Void (System.Boolean value [None])
+M A2UI.Core.ValidationResult.<Clone>$ [Public, HideBySig] -> A2UI.Core.ValidationResult ()
+M A2UI.Core.ValidationResult.Deconstruct [Public, HideBySig] -> System.Void (System.Boolean& Valid [Out], System.String?& Code [Out], System.String?& Message [Out], System.String& Severity [Out])
+M A2UI.Core.ValidationResult.Equals [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Boolean (A2UI.Core.ValidationResult? other [None])
+M A2UI.Core.ValidationResult.Equals [Public, Virtual, HideBySig] -> System.Boolean (System.Object? obj [None])
+M A2UI.Core.ValidationResult.GetHashCode [Public, Virtual, HideBySig] -> System.Int32 ()
+M A2UI.Core.ValidationResult.ToString [Public, Virtual, HideBySig] -> System.String ()
+M A2UI.Core.ValidationResult.get_Code [Public, HideBySig, SpecialName] -> System.String? ()
+M A2UI.Core.ValidationResult.get_Message [Public, HideBySig, SpecialName] -> System.String? ()
+M A2UI.Core.ValidationResult.get_Severity [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.ValidationResult.get_Valid [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Core.ValidationResult.op_Equality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.ValidationResult? left [None], A2UI.Core.ValidationResult? right [None])
+M A2UI.Core.ValidationResult.op_Inequality [Public, Static, HideBySig, SpecialName] -> System.Boolean (A2UI.Core.ValidationResult? left [None], A2UI.Core.ValidationResult? right [None])
+M A2UI.Core.ValidationResult.set_Code [Public, HideBySig, SpecialName] -> System.Void (System.String? value [None])
+M A2UI.Core.ValidationResult.set_Message [Public, HideBySig, SpecialName] -> System.Void (System.String? value [None])
+M A2UI.Core.ValidationResult.set_Severity [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.ValidationResult.set_Valid [Public, HideBySig, SpecialName] -> System.Void (System.Boolean value [None])
+M A2UI.Core.WireMessage.TryDecode [Public, Static, HideBySig] -> System.Boolean (System.ReadOnlyMemory`1[T][System.Byte] utf8 [None], A2UI.Core.WireDirection direction [None], A2UI.Core.WireMessage?& message [Out], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
+M A2UI.Core.WireMessage.WriteTo [Public, HideBySig] -> System.Void (System.Text.Json.Utf8JsonWriter writer [None])
+M A2UI.Core.WireMessage.get_Direction [Public, HideBySig, SpecialName] -> A2UI.Core.WireDirection ()
+M A2UI.Core.WireMessage.get_Envelope [Public, HideBySig, SpecialName] -> System.Text.Json.JsonElement ()
+M A2UI.Core.WireMessage.get_Kind [Public, HideBySig, SpecialName] -> System.String ()
+M A2UI.Core.WireMessage.get_Payload [Public, HideBySig, SpecialName] -> System.Text.Json.JsonElement ()
+M A2UI.Core.WireMetadata.TryDecode [Public, Static, HideBySig] -> System.Boolean (System.ReadOnlyMemory`1[T][System.Byte] utf8 [None], A2UI.Core.WireMetadataKind kind [None], A2UI.Core.WireMetadata?& metadata [Out], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
+M A2UI.Core.WireMetadata.WriteTo [Public, HideBySig] -> System.Void (System.Text.Json.Utf8JsonWriter writer [None])
+M A2UI.Core.WireMetadata.get_Kind [Public, HideBySig, SpecialName] -> A2UI.Core.WireMetadataKind ()
+M A2UI.Core.WireMetadata.get_Value [Public, HideBySig, SpecialName] -> System.Text.Json.JsonElement ()
+P A2UI.Core.A2uiDiagnostic.Code : System.String () init
+P A2UI.Core.A2uiDiagnostic.Message : System.String () init
+P A2UI.Core.A2uiDiagnostic.Path : System.String () init
+P A2UI.Core.ActionResult.Error : A2UI.Core.RendererError? () init
+P A2UI.Core.ActionResult.Message : A2UI.Core.WireMessage? () init
+P A2UI.Core.AgentFunctionClient.CanSend : System.Boolean ()
+P A2UI.Core.AgentFunctionClient.PendingCount : System.Int32 ()
+P A2UI.Core.AgentFunctionException.Code : System.String ()
+P A2UI.Core.AgentFunctionOutcome.ErrorCode : System.String? () init
+P A2UI.Core.AgentFunctionOutcome.ErrorMessage : System.String? () init
+P A2UI.Core.AgentFunctionOutcome.Succeeded : System.Boolean ()
+P A2UI.Core.AgentFunctionOutcome.Value : System.Text.Json.JsonElement () init
+P A2UI.Core.BasicFunctions.Names : System.Collections.Generic.IReadOnlyCollection`1[T][System.String] ()
+P A2UI.Core.CatalogRegistry.CatalogIds : System.Collections.Generic.IReadOnlyCollection`1[T][System.String] ()
+P A2UI.Core.CheckResult.Result : A2UI.Core.ValidationResult? () init
+P A2UI.Core.CheckResult.State : A2UI.Core.CheckState () init
+P A2UI.Core.ComponentOccurrence.Children : System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.ComponentOccurrence] () init
+P A2UI.Core.ComponentOccurrence.ComponentId : System.String () init
+P A2UI.Core.ComponentOccurrence.ComponentType : System.String () init
+P A2UI.Core.ComponentOccurrence.DataPath : System.String () init
+P A2UI.Core.ComponentOccurrence.Definition : System.Text.Json.JsonElement () init
+P A2UI.Core.ComponentOccurrence.InstanceId : System.String () init
+P A2UI.Core.ComponentOccurrence.Position : System.String () init
+P A2UI.Core.FunctionBinding.HasFailed : System.Boolean ()
+P A2UI.Core.FunctionBinding.IsPending : System.Boolean ()
+P A2UI.Core.FunctionBinding.Passes : System.Boolean ()
+P A2UI.Core.FunctionBinding.Value : System.Text.Json.JsonElement ()
+P A2UI.Core.GraphValidationOptions.AllowDanglingReferences : System.Boolean () init
+P A2UI.Core.GraphValidationOptions.AllowMissingRoot : System.Boolean () init
+P A2UI.Core.GraphValidationOptions.AllowOrphanComponents : System.Boolean () init
+P A2UI.Core.GraphValidationOptions.Progressive : A2UI.Core.GraphValidationOptions ()
+P A2UI.Core.GraphValidationOptions.Strict : A2UI.Core.GraphValidationOptions ()
+P A2UI.Core.HostFunctionCall.Args : System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, System.Text.Json.JsonElement] () init
+P A2UI.Core.HostFunctionCall.CatalogId : System.String () init
+P A2UI.Core.HostFunctionCall.Name : System.String () init
+P A2UI.Core.HostFunctionCall.SurfaceId : System.String () init
+P A2UI.Core.HostFunctionCall.UserInitiated : System.Boolean () init
+P A2UI.Core.NodeResolver.Nodes : System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.ResolvedNode] ()
+P A2UI.Core.ProtocolSchemas.AgentToRenderer : System.Text.Json.JsonElement ()
+P A2UI.Core.ProtocolSchemas.CommonTypes : System.Text.Json.JsonElement ()
+P A2UI.Core.RendererError.Category : System.String () init
+P A2UI.Core.RendererError.Code : System.String () init
+P A2UI.Core.RendererError.FunctionCallId : System.String? () init
+P A2UI.Core.RendererError.Message : System.String () init
+P A2UI.Core.RendererError.Path : System.String? () init
+P A2UI.Core.RendererError.SurfaceId : System.String? () init
+P A2UI.Core.ResolvedNode.BlockingResult : A2UI.Core.ValidationResult? ()
+P A2UI.Core.ResolvedNode.Checks : System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.CheckResult] ()
+P A2UI.Core.ResolvedNode.ComponentId : System.String ()
+P A2UI.Core.ResolvedNode.ComponentType : System.String ()
+P A2UI.Core.ResolvedNode.DataPath : System.String ()
+P A2UI.Core.ResolvedNode.InstanceId : System.String ()
+P A2UI.Core.ResolvedNode.IsValid : System.Boolean ()
+P A2UI.Core.ResolvedNode.Position : System.String ()
+P A2UI.Core.ResolvedNode.Props : System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, A2UI.Core.ResolvedProperty] ()
+P A2UI.Core.ResolvedNode.ValidationErrors : System.Collections.Generic.IReadOnlyList`1[T][System.String] ()
+P A2UI.Core.ResolvedNode.ValidationResults : System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.ValidationResult] ()
+P A2UI.Core.ResolvedProperty.BindingPath : System.String? () init
+P A2UI.Core.ResolvedProperty.ChildPositions : System.Collections.Generic.IReadOnlyList`1[T][System.String] () init
+P A2UI.Core.ResolvedProperty.Kind : A2UI.Core.ResolvedPropertyKind () init
+P A2UI.Core.ResolvedProperty.Value : System.Nullable`1[System.Text.Json.JsonElement] () init
+P A2UI.Core.ResolvedProperty.Writable : System.Boolean () init
+P A2UI.Core.SurfaceChange.DataPath : System.String? () init
+P A2UI.Core.SurfaceChange.Kind : System.String () init
+P A2UI.Core.SurfaceChange.Snapshot : A2UI.Core.SurfaceSnapshot? () init
+P A2UI.Core.SurfaceChange.SurfaceId : System.String () init
+P A2UI.Core.SurfaceSnapshot.CatalogId : System.String? () init
+P A2UI.Core.SurfaceSnapshot.Components : System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, System.Text.Json.JsonElement] () init
+P A2UI.Core.SurfaceSnapshot.Container : System.Text.Json.JsonElement ()
+P A2UI.Core.SurfaceSnapshot.DataModel : System.Text.Json.JsonElement () init
+P A2UI.Core.SurfaceSnapshot.Id : System.String () init
+P A2UI.Core.SurfaceSnapshot.RootComponentId : System.String ()
+P A2UI.Core.SurfaceSnapshot.SendDataModel : System.Boolean () init
+P A2UI.Core.ValidationResult.Code : System.String? () init
+P A2UI.Core.ValidationResult.Message : System.String? () init
+P A2UI.Core.ValidationResult.Severity : System.String () init
+P A2UI.Core.ValidationResult.Valid : System.Boolean () init
+P A2UI.Core.WireMessage.Direction : A2UI.Core.WireDirection ()
+P A2UI.Core.WireMessage.Envelope : System.Text.Json.JsonElement ()
+P A2UI.Core.WireMessage.Kind : System.String ()
+P A2UI.Core.WireMessage.Payload : System.Text.Json.JsonElement ()
+P A2UI.Core.WireMetadata.Kind : A2UI.Core.WireMetadataKind ()
+P A2UI.Core.WireMetadata.Value : System.Text.Json.JsonElement ()
+T A2UI.Core.A2uiDiagnostic [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Core.A2uiDiagnostic]]
+T A2UI.Core.ActionDispatcher [Public, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Core.ActionResult [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Core.ActionResult]]
+T A2UI.Core.AgentFunctionClient [Public, Sealed, BeforeFieldInit] : System.Object [System.IDisposable]
+T A2UI.Core.AgentFunctionException [Public, Sealed, BeforeFieldInit] : System.Exception [System.Runtime.Serialization.ISerializable]
+T A2UI.Core.AgentFunctionOutcome [Public, SequentialLayout, Sealed, BeforeFieldInit] : System.ValueType [System.IEquatable`1[A2UI.Core.AgentFunctionOutcome]]
+T A2UI.Core.BasicFunctions [Public, Abstract, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Core.CatalogRegistry [Public, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Core.CheckResult [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Core.CheckResult]]
+T A2UI.Core.CheckState [Public, Sealed] : System.Enum [System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable]
+T A2UI.Core.ComponentOccurrence [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Core.ComponentOccurrence]]
+T A2UI.Core.ExpressionTemplate [Public, Abstract, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Core.FunctionBinding [Public, Sealed, BeforeFieldInit] : System.Object [System.IDisposable]
+T A2UI.Core.FunctionCallRouter [Public, Sealed, BeforeFieldInit] : System.Object [System.IDisposable]
+T A2UI.Core.FunctionEvaluator [Public, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Core.GraphValidationOptions [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Core.GraphValidationOptions]]
+T A2UI.Core.HostFunction [Public, Sealed] : System.MulticastDelegate [System.ICloneable, System.Runtime.Serialization.ISerializable]
+T A2UI.Core.HostFunctionCall [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Core.HostFunctionCall]]
+T A2UI.Core.NodeResolver [Public, Sealed, BeforeFieldInit] : System.Object [System.IDisposable]
+T A2UI.Core.ProtocolSchemas [Public, Abstract, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Core.RendererError [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Core.RendererError]]
+T A2UI.Core.RendererFunctionHandler [Public, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Core.ResolvedNode [Public, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Core.ResolvedProperty [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Core.ResolvedProperty]]
+T A2UI.Core.ResolvedPropertyKind [Public, Sealed] : System.Enum [System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable]
+T A2UI.Core.SurfaceChange [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Core.SurfaceChange]]
+T A2UI.Core.SurfaceSession [Public, Sealed, BeforeFieldInit] : System.Object [System.IDisposable]
+T A2UI.Core.SurfaceSnapshot [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Core.SurfaceSnapshot]]
+T A2UI.Core.ValidationResult [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Core.ValidationResult]]
+T A2UI.Core.WireDirection [Public, Sealed] : System.Enum [System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable]
+T A2UI.Core.WireMessage [Public, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Core.WireMetadata [Public, Sealed, BeforeFieldInit] : System.Object []
+T A2UI.Core.WireMetadataKind [Public, Sealed] : System.Enum [System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable]
