@@ -47,11 +47,11 @@ internal static class AgentSmoke
                 return;
         }
         throw new InvalidOperationException("Delivery did not resume in order.");
-
-        static WireMessage Decode(string json) =>
-            WireMessage.TryDecode(System.Text.Encoding.UTF8.GetBytes(json), WireDirection.AgentToRenderer,
-                out var message, out var diagnostic) ? message! : throw new InvalidOperationException(diagnostic?.ToString());
     }
+
+    private static WireMessage Decode(string json) =>
+        WireMessage.TryDecode(System.Text.Encoding.UTF8.GetBytes(json), WireDirection.AgentToRenderer,
+            out var message, out var diagnostic) ? message! : throw new InvalidOperationException(diagnostic?.ToString());
 
     private static void CheckStreaming()
     {
@@ -140,9 +140,68 @@ internal static class AgentSmoke
             throw new InvalidOperationException("Recovery lost the text after the last rejected block.");
     }
 
+    private static void CheckInboundTurn()
+    {
+        var catalogs = new CatalogRegistry(includeBasicCatalog: false);
+        using var source = JsonDocument.Parse("""
+            {"catalogId":"smoke/form","protocolVersion":"1.0","components":{}}
+            """);
+        using var arguments = JsonDocument.Parse("""
+            {"type":"object","properties":{"salutation":{"type":"string","default":"Hello"}}}
+            """);
+        var functions = new AgentFunctions();
+        var problem = functions.Register(catalogs, source.RootElement,
+            [new("greet", (call, _) => ValueTask.FromResult(call.Arguments.GetProperty("salutation")),
+                arguments.RootElement, "string")]);
+        if (problem is not null)
+            throw new InvalidOperationException(problem.ToString());
+        if (RequestProcessor.Fixed(catalogs, out var request) is { } configurationError)
+            throw new InvalidOperationException(configurationError.ToString());
+
+        using var state = request!.CreateSession();
+        var create = Decode("""{"version":"1.0","createSurface":{"surfaceId":"form","catalogId":"smoke/form"}}""");
+        if (state.Prepare([create], out var initial) is { } initialError)
+            throw new InvalidOperationException(initialError.ToString());
+        using var initialTurn = initial!;
+        initialTurn.Commit();
+        initialTurn.Acknowledge(create);
+
+        WireMessage? received = null;
+        var inbound = request.CreateMessageProcessor(functions, onAction: (message, _) =>
+        {
+            received = message;
+            return ValueTask.FromResult(true);
+        });
+        var routed = inbound.ProcessAsync("""
+            {"version":"1.0","action":{"name":"submit","sourceComponentId":"button",
+              "surfaceId":"form","timestamp":"2026-01-01T00:00:00Z","context":{"name":"Ada"}}}
+            """u8.ToArray()).AsTask().GetAwaiter().GetResult();
+        if (!routed.Handled || routed.Reply is not null || routed.Diagnostic is not null ||
+            received?.Payload.GetProperty("context").GetProperty("name").GetString() != "Ada")
+            throw new InvalidOperationException("The action did not reach the second turn.");
+
+        var rpc = inbound.ProcessAsync("""
+            {"version":"1.0","callAgentFunction":{"functionCallId":"call-1","surfaceId":"form",
+              "callFunction":{"@call":"greet","catalogId":"smoke/form","args":{}}}}
+            """u8.ToArray()).AsTask().GetAwaiter().GetResult();
+        if (!rpc.Handled || rpc.Reply?.Payload.GetProperty("value").GetString() != "Hello" ||
+            rpc.Reply.Payload.GetProperty("functionCallId").GetString() != "call-1")
+            throw new InvalidOperationException("The agent function did not return its correlated result.");
+
+        var remove = Decode("""{"version":"1.0","deleteSurface":{"surfaceId":"form"}}""");
+        if (state.Prepare([remove], out var final) is { } finalError)
+            throw new InvalidOperationException(finalError.ToString());
+        using var finalTurn = final!;
+        finalTurn.Commit();
+        finalTurn.Acknowledge(remove);
+        if (state.TryGetSurface("form", out _))
+            throw new InvalidOperationException("The second turn did not close the form.");
+    }
+
     internal static void Run()
     {
         CheckDelivery();
+        CheckInboundTurn();
         CheckStreaming();
         using var mirror = new RendererState(new CatalogRegistry());
         const string response = """Hello <a2ui-json>{"version":"1.0","createSurface":{"surfaceId":"form"}}</a2ui-json> Done""";

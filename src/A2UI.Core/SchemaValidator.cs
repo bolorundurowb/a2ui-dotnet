@@ -130,7 +130,9 @@ internal sealed class SchemaValidator(Func<string, JsonElement?> resolve, bool d
                     if (keyword == "allOf" || outcome.Error.Code is "unresolvedReference" or "schemaDepth")
                         return outcome;
                     if (failure.Error is null || outcome.Error.Code == "unknownCatalog" ||
-                        failure.Error.Code != "unknownCatalog" && outcome.Error.Path.Length > failure.Error.Path.Length)
+                        failure.Error.Code != "unknownCatalog" &&
+                        (outcome.Error.Code == "unknownCatalogFunction" ||
+                            failure.Error.Code != "unknownCatalogFunction" && outcome.Error.Path.Length > failure.Error.Path.Length))
                         failure = outcome;
                     continue;
                 }
@@ -275,8 +277,10 @@ internal sealed class SchemaValidator(Func<string, JsonElement?> resolve, bool d
                             return Fail("duplicateItem", WireJson.Path(path, index.ToString(CultureInfo.InvariantCulture)));
         }
 
-        if (value.ValueKind == JsonValueKind.Number && schema.TryGetProperty("minimum", out var minimum) &&
-            value.GetDouble() < minimum.GetDouble())
+        if (value.ValueKind == JsonValueKind.Number &&
+            (schema.TryGetProperty("minimum", out var minimum) && value.GetDouble() < minimum.GetDouble() ||
+                schema.TryGetProperty("exclusiveMinimum", out var exclusiveMinimum) &&
+                exclusiveMinimum.ValueKind == JsonValueKind.Number && value.GetDouble() <= exclusiveMinimum.GetDouble()))
             return Fail("invalidValue");
         if (value.ValueKind == JsonValueKind.String)
         {

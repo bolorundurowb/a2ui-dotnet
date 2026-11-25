@@ -189,7 +189,8 @@ public sealed class CatalogRegistry
     }
 
     // Applies the schema defaults of a function's arguments, then checks them against the schema.
-    internal A2uiDiagnostic? ParseArguments(string catalogId, string name, JsonElement args, out JsonElement parsed)
+    internal A2uiDiagnostic? ParseArguments(string catalogId, string name, JsonElement args, out JsonElement parsed,
+        bool validateBeforeDefaults = false)
     {
         parsed = args;
         if (!_catalogs.TryGetValue(catalogId, out var catalog) ||
@@ -198,23 +199,40 @@ public sealed class CatalogRegistry
             !declaration.TryGetProperty("properties", out var members) || !members.TryGetProperty("args", out var schema))
             return null;
 
+        if (validateBeforeDefaults && catalog.Validator.Validate(args, schema, catalog.Definition) is { } invalid)
+            return invalid;
         var node = JsonNode.Parse(args.GetRawText());
-        ApplyDefaults(node, schema);
+        ApplyDefaults(node, schema, validateBeforeDefaults ? catalog.Definition : default);
         parsed = ProtocolSchemas.Parse(node?.ToJsonString() ?? "null");
         return catalog.Validator.Validate(parsed, schema, catalog.Definition);
     }
 
-    private static void ApplyDefaults(JsonNode? instance, JsonElement schema)
+    private static void ApplyDefaults(JsonNode? instance, JsonElement schema, JsonElement document = default, int depth = 0)
     {
-        if (schema.ValueKind != JsonValueKind.Object)
+        if (schema.ValueKind != JsonValueKind.Object || depth >= 64)
             return;
+        if (document.ValueKind != JsonValueKind.Undefined)
+        {
+            if (schema.TryGetProperty("$ref", out var reference))
+            {
+                var parts = reference.GetString()!.Split('#', 2);
+                var source = parts[0].Length == 0 ||
+                    document.TryGetProperty("$id", out var identity) && identity.ValueEquals(parts[0])
+                        ? document : ProtocolSchemas.Resolve(parts[0]);
+                if (source is { } target && SchemaValidator.TryResolvePointer(target, parts.Length == 2 ? parts[1] : "", out var resolved))
+                    ApplyDefaults(instance, resolved, target, depth + 1);
+            }
+            if (schema.TryGetProperty("allOf", out var branches) && branches.ValueKind == JsonValueKind.Array)
+                foreach (var branch in branches.EnumerateArray())
+                    ApplyDefaults(instance, branch, document, depth + 1);
+        }
         if (instance is JsonObject members && schema.TryGetProperty("properties", out var properties) &&
             properties.ValueKind == JsonValueKind.Object)
         {
             foreach (var property in properties.EnumerateObject())
             {
                 if (members.TryGetPropertyValue(property.Name, out var present))
-                    ApplyDefaults(present, property.Value);
+                    ApplyDefaults(present, property.Value, document, depth + 1);
                 else if (property.Value.ValueKind == JsonValueKind.Object && property.Value.TryGetProperty("default", out var fallback))
                     members[property.Name] = JsonNode.Parse(fallback.GetRawText());
             }
@@ -222,7 +240,7 @@ public sealed class CatalogRegistry
         else if (instance is JsonArray items && schema.TryGetProperty("items", out var itemSchema))
         {
             foreach (var item in items)
-                ApplyDefaults(item, itemSchema);
+                ApplyDefaults(item, itemSchema, document, depth + 1);
         }
     }
     /// <summary>Validates a component against its explicit catalog or the surface default.</summary>

@@ -37,6 +37,16 @@ The published 1.0 Basic, MCP and VegaChart definitions load with their reference
 
 The Core smoke check covers a Unicode component and function argument schema, rejection of an invalid argument name, a renderer function that requires user activation, and explicit component routing on a mixed catalog surface.
 
+## Agent inbound messages
+
+Use `AgentFunctions.Register` to add host function declarations to the agent's copy of a catalogue before negotiation. Use `RequestProcessor.CreateMessageProcessor` to bind those handlers to the selected catalogues, then pass renderer envelopes to `ProcessAsync`. Action, error and renderer-function response callbacks receive validated messages. A missing callback or a callback that declines leaves the message available to the host. An agent function call produces a correlated `agentFunctionResponse` with a value or an RPC error.
+
+The renderer enforces any catalogue-declared user activation requirement before sending an agent function call. The host authenticates the renderer, isolates conversations and owns model retries, business side effects and storage.
+
+All 64 `agent_functions.yaml` cases pass against pinned revision `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe`, including argument defaults, catalogue selection, callback routing and validation of model output. The complete Windows x64 Release run on .NET 8.0.34 passed 489 Core and 311 Agent cases with 376 Core and 719 Agent exclusions and no failures. The clean Agent package smoke check opens a form, routes a returned action, serves an agent function and closes the form in the second turn.
+
+The pinned agent-functions catalogue fixture has no components and omits `$defs.anyComponent`. When populating a catalogue's schema unions, registration supplies a false union for an empty component set. The fixture's function declarations are kept intact. [Pinned catalogue fixture](https://github.com/a2ui-project/a2ui/blob/d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe/conformance/test_data/catalogs/agent_functions_catalog_v1_0.json)
+
 ## Core state behavior
 
 `SurfaceSession` defaults to progressive topology validation for streamed updates. It accepts temporarily missing roots, forward references and orphans. Use `GraphValidationOptions.Strict` to require a complete reachable graph after each nonempty component batch. Both modes enforce composition, cycles and a 50-edge nesting limit before committing. A rejected operation preserves the previous snapshot and emits no change event.
