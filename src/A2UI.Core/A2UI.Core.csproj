@@ -5,6 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="A2UI.Agent" />
     <EmbeddedResource Include="Upstream/*.json" />
     <None Update="Upstream/LICENSE;Upstream/NOTICE.md" Pack="true" PackagePath="licenses/" />
   </ItemGroup>

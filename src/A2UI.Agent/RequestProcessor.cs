@@ -27,6 +27,17 @@ public sealed class RequestProcessor
     /// <returns>The fresh renderer state bound to the selected catalogs.</returns>
     public RendererState CreateSession() => new(_catalogs);
 
+    /// <summary>Creates a processor for messages sent by the renderer with the selected catalogs.</summary>
+    /// <param name="functions">Host functions associated with the selected catalogs.</param>
+    /// <param name="onAction">Optional callback for validated actions.</param>
+    /// <param name="onError">Optional callback for validated renderer errors.</param>
+    /// <param name="onRendererFunctionResponse">Optional callback for validated renderer function responses.</param>
+    /// <returns>The inbound message processor.</returns>
+    public RendererMessageProcessor CreateMessageProcessor(AgentFunctions? functions = null,
+        RendererMessageHandler? onAction = null, RendererMessageHandler? onError = null,
+        RendererMessageHandler? onRendererFunctionResponse = null) =>
+        new(_catalogs, functions, onAction, onError, onRendererFunctionResponse);
+
     /// <summary>Negotiates a request against renderer capabilities.</summary>
     /// <param name="registered">The configured catalog registry.</param>
     /// <param name="capabilities">The required renderer capabilities.</param>
