@@ -150,9 +150,18 @@ public sealed class SurfaceSession : IDisposable
     /// A session belongs to one agent connection, so the metadata only carries data that surface's owning agent created
     /// the surface for. Surfaces that did not opt in never appear. Two sessions never share surfaces, even with equal IDs.
     /// </remarks>
-    public WireMetadata? GetRendererDataModel()
+    public WireMetadata? GetRendererDataModel() => GetRendererDataModel(WireMessage.Version);
+
+    /// <summary>Collects opted-in data models for the requested protocol version.</summary>
+    /// <param name="protocolVersion">The exact wire version to report.</param>
+    /// <returns>The renderer data model metadata, or null when no live surface matches.</returns>
+    public WireMetadata? GetRendererDataModel(string protocolVersion)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(protocolVersion);
+        if (protocolVersion != WireMessage.Version)
+            return null;
+
         using var stream = new MemoryStream();
         var count = 0;
         using (var writer = new Utf8JsonWriter(stream))

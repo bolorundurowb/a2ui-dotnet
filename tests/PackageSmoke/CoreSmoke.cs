@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using A2UI.Core;
@@ -9,6 +10,7 @@ internal static class CoreSmoke
     {
         var registry = new CatalogRegistry();
         CheckOccurrences(registry);
+        CheckSessionDisposal(registry);
         var custom = """
             {
               "catalogId":"test:cards","protocolVersion":"1.0",
@@ -135,6 +137,33 @@ internal static class CoreSmoke
 
     // Pins how the codec treats number text, absent members, explicit null and input ownership. Decode clears the
     // input buffer, so every read below also proves that the message does not borrow from its input.
+    private static void CheckSessionDisposal(CatalogRegistry registry)
+    {
+        using var session = new SurfaceSession(registry);
+        var (snapshot, subscriber) = PopulateSession(session);
+        session.Dispose();
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        Require(!snapshot.IsAlive && !subscriber.IsAlive);
+        GC.KeepAlive(session);
+    }
+
+    // Keep the snapshot and delegate locals out of the stack frame that forces collection.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (WeakReference Snapshot, WeakReference Subscriber) PopulateSession(SurfaceSession session)
+    {
+        var notifications = 0;
+        Action<SurfaceChange> subscriber = _ => notifications++;
+        session.Changed += subscriber;
+        Require(session.Apply(Decode("""
+            {"version":"1.0","createSurface":{"surfaceId":"disposal"}}
+            """)) is null);
+        Require(session.TryGetSurface("disposal", out var snapshot) && notifications == 1);
+        return (new WeakReference(snapshot), new WeakReference(subscriber));
+    }
+
     private static void CheckWireFidelity()
     {
         string[] numbers = ["1.0", "1.00E+2", "-0.0", "123456789012345678901234567890.123456789", "1e400", "0.1"];
