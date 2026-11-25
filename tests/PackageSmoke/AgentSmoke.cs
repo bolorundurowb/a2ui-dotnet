@@ -92,6 +92,65 @@ internal static class AgentSmoke
         CheckRejectedBlockRecovery(first);
     }
 
+    private static async Task CheckStreamingBackpressure()
+    {
+        using var state = new RendererState(new CatalogRegistry());
+        var stream = new DirectJsonStream(state);
+        var deliveryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDelivery = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var chunksRead = 0;
+        var delivered = new List<string>();
+        var pump = Pump();
+
+        try
+        {
+            await deliveryStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            if (chunksRead != 1 || state.TryGetSurface("second", out _))
+                throw new InvalidOperationException("The host read ahead while delivery was blocked.");
+        }
+        finally
+        {
+            releaseDelivery.TrySetResult();
+            await pump;
+        }
+
+        if (chunksRead != 2 || !delivered.SequenceEqual(new[] { "first", "second" }) ||
+            !state.TryGetSurface("second", out _))
+            throw new InvalidOperationException("The host did not resume ordered delivery.");
+
+        IEnumerable<string> ReadChunks()
+        {
+            foreach (var id in new[] { "first", "second" })
+            {
+                chunksRead++;
+                yield return $$$"""<a2ui-json>{"version":"1.0","createSurface":{"surfaceId":"{{{id}}}"}}</a2ui-json>""";
+            }
+        }
+
+        async Task Pump()
+        {
+            foreach (var chunk in ReadChunks())
+            {
+                if (stream.Read(chunk, out var parts) is { } error)
+                    throw new InvalidOperationException(error.ToString());
+
+                foreach (var message in parts.SelectMany(part => part.Messages ?? []))
+                {
+                    if (delivered.Count == 0)
+                    {
+                        deliveryStarted.TrySetResult();
+                        await releaseDelivery.Task;
+                    }
+
+                    delivered.Add(message.Payload.GetProperty("surfaceId").GetString()!);
+                }
+            }
+
+            if (stream.Read("", out var tail, final: true) is not null || tail.Count != 0)
+                throw new InvalidOperationException("The response did not finalise cleanly.");
+        }
+    }
+
     private static void CheckRejectedPrefix(string first, string bad)
     {
         const string open = "<a2ui-json>";
@@ -144,6 +203,7 @@ internal static class AgentSmoke
     {
         CheckDelivery();
         CheckStreaming();
+        CheckStreamingBackpressure().GetAwaiter().GetResult();
         using var mirror = new RendererState(new CatalogRegistry());
         const string response = """Hello <a2ui-json>{"version":"1.0","createSurface":{"surfaceId":"form"}}</a2ui-json> Done""";
         var issue = DirectJson.ParseResponse(response, mirror, out var parts, out var candidate);
