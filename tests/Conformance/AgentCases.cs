@@ -12,6 +12,7 @@ internal static class AgentCases
             !test.GetProperty("args").TryGetProperty("format_override", out _) &&
             !test.GetProperty("name").GetString()!.Contains("v0_9", StringComparison.Ordinal) ||
         path == "conformance/agent/direct_json/prompt_generator.yaml" ||
+        path == "conformance/agent/skill.yaml" && test.GetProperty("action").ValueEquals("export_to_directory") ||
         path == "conformance/agent/skill.yaml" && test.GetProperty("name").GetString()!.StartsWith("test_direct_json_", StringComparison.Ordinal) ||
         path == "conformance/agent/direct_json/compiler.yaml" ||
         path == "conformance/agent/direct_json/decompiler.yaml" && !test.GetProperty("name").ValueEquals("test_decompile_json_catalog_qualified_components") ||
@@ -24,8 +25,53 @@ internal static class AgentCases
         test.GetProperty("args").GetProperty("version").ValueEquals("1.0") ||
         path == "conformance/agent/catalog_transformer.yaml";
 
+    private static void CheckSkillExport(JsonElement test)
+    {
+        var temporary = Directory.CreateTempSubdirectory("a2ui-skills-");
+        var root = Directory.CreateDirectory(Path.Combine(temporary.FullName, "output")).FullName;
+        try
+        {
+            var args = test.GetProperty("args");
+            foreach (var file in args.GetProperty("pre_existing_files").EnumerateArray())
+            {
+                var path = Path.Combine(root, file.GetString()!);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, "existing content");
+            }
+
+            var skills = args.GetProperty("skills").EnumerateArray().Select(skill =>
+                new SkillFile(skill.TryGetProperty("filename", out var file) ? file.GetString()! :
+                    skill.GetProperty("name").GetString() + "/SKILL.md",
+                    skill.GetProperty("content").GetString()!)).ToArray();
+            var error = SkillSet.ExportToDirectory(root, skills);
+            if (test.TryGetProperty("expect_error", out var expectedError))
+                Require(error?.Code == expectedError.GetProperty("category").GetString(), "Wrong skill export diagnostic.");
+            else
+            {
+                Require(error is null, error?.ToString() ?? "");
+                foreach (var skill in skills)
+                    Require(File.ReadAllText(Path.Combine(root, skill.FileName)) == skill.Content, "Wrong skill content.");
+            }
+
+            foreach (var file in test.GetProperty("expected_files").EnumerateArray())
+                Require(File.Exists(Path.Combine(root, file.GetString()!)), $"Missing file {file}.");
+            if (test.TryGetProperty("expected_absent_files", out var absent))
+                foreach (var file in absent.EnumerateArray())
+                    Require(!File.Exists(Path.Combine(root, file.GetString()!)), $"Unexpected file {file}.");
+        }
+        finally
+        {
+            temporary.Delete(recursive: true);
+        }
+    }
+
     internal static void Run(JsonElement test, string assets)
     {
+        if (test.GetProperty("action").ValueEquals("export_to_directory"))
+        {
+            CheckSkillExport(test);
+            return;
+        }
         if (test.GetProperty("action").ValueEquals("parse_chunk"))
         {
             StreamCases.Run(test, assets);
