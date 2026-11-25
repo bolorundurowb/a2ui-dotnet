@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -281,6 +282,13 @@ public sealed class CatalogRegistry
 
         var common = ProtocolSchemas.Resolve("common_types.json")!.Value;
         var functionSchema = common.GetProperty("$defs").GetProperty("FunctionCall");
+        if (group == "components")
+        {
+            if (WireJson.ExceedsContainerDepth(value))
+                return new("componentValueDepth", "", "Global recursion limit exceeded.");
+            if (CheckCallDepth(value, 0) is { } depthError)
+                return depthError;
+        }
         var problem = group == "components"
             ? catalog.Validator.ValidateComponent(value, schema, catalog.Definition, common, defaultCatalogId)
             : catalog.Validator.Validate(value, functionSchema, common, defaultCatalogId);
@@ -291,6 +299,11 @@ public sealed class CatalogRegistry
             if (WireJson.IsObject(current))
             {
                 var isCall = current.TryGetProperty("@call", out var call) && call.ValueKind == JsonValueKind.String;
+                if (group == "components" && isCall && call.GetString() is { } callName &&
+                    ResolveFunction(current, defaultCatalogId) is { } resolved &&
+                    resolved.Item2.TryGetProperty("allowedCallers", out var callers) && callers.ValueEquals("agentOnly"))
+                    return new("agentOnlyFunction", path, $"Function '{callName}' is agentOnly and cannot be called by a component.");
+
                 if (inArguments && isCall &&
                     catalog.Validator.Validate(current, functionSchema, common, defaultCatalogId) is { } failure)
                     return failure with { Path = path + failure.Path };
@@ -311,9 +324,38 @@ public sealed class CatalogRegistry
         }
     }
 
+    private static A2uiDiagnostic? CheckCallDepth(JsonElement value, int depth)
+    {
+        if (WireJson.IsObject(value))
+        {
+            if (value.TryGetProperty("@call", out var call) && call.ValueKind == JsonValueKind.String && ++depth > 5)
+                return new("functionCallDepth", "", "The functionCall depth limit of 5 was exceeded.");
+            foreach (var member in value.EnumerateObject())
+                if (CheckCallDepth(member.Value, depth) is { } failure)
+                    return failure with { Path = WireJson.Path("", member.Name) + failure.Path };
+        }
+        else if (value.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+            foreach (var item in value.EnumerateArray())
+            {
+                if (CheckCallDepth(item, depth) is { } failure)
+                    return failure with { Path = $"/{index.ToString(CultureInfo.InvariantCulture)}{failure.Path}" };
+                index++;
+            }
+        }
+        return null;
+    }
+
     private (JsonElement, JsonElement)? ResolveFunction(JsonElement function, string? defaultCatalogId)
     {
-        var id = function.TryGetProperty("catalogId", out var catalogId) ? catalogId.GetString() : defaultCatalogId;
+        var id = defaultCatalogId;
+        if (function.TryGetProperty("catalogId", out var catalogId))
+        {
+            if (catalogId.ValueKind != JsonValueKind.String)
+                return null;
+            id = catalogId.GetString();
+        }
         var name = function.GetProperty("@call").GetString()!;
         if (id is null || !_catalogs.TryGetValue(id, out var catalog) ||
             !catalog.Definition.TryGetProperty("functions", out var functions) || !functions.TryGetProperty(name, out var schema))

@@ -44,7 +44,7 @@ public sealed record RendererError(string Category, string Code, string Message)
                 "CatalogError" => ("CatalogError", "CATALOG_ERROR"),
                 "duplicateSurface" or "unknownSurface" or "duplicateComponent" or "danglingReference" or "missingRoot" or
                     "orphanComponent" => ("IntegrityError", "INTEGRITY_ERROR"),
-                "circularReference" or "graphDepth" => ("RecursionError", "RECURSION_LIMIT_EXCEEDED"),
+                "circularReference" or "graphDepth" or "functionCallDepth" or "dataModelDepth" or "componentValueDepth" => ("RecursionError", "RECURSION_LIMIT_EXCEEDED"),
                 "invalidDataPath" or "forbiddenPathKey" => ("DataError", "DATA_ERROR"),
                 "unallowedParent" => ("ValidationError", "UNALLOWED_PARENT"),
                 "unallowedChild" => ("ValidationError", "UNALLOWED_CHILD"),
