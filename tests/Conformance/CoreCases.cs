@@ -5,9 +5,84 @@ using A2UI.Core;
 
 internal static class CoreCases
 {
-    internal static bool Supports(string file, string id) => (file, id) switch
+    internal static string? CatalogExclusion(string file, JsonElement test, string id)
+    {
+        if (file == "conformance/core/multi_catalog.yaml")
+            return id switch
+            {
+                "test_multi_catalog_function_call_catalog_id_override" => null,
+                "test_multi_catalog_version_mismatch_error" => null,
+                "test_multi_catalog_format_string_index_and_catalog_call_without_default" =>
+                    "The fixture routes components using bare catalogId. The pinned wire protocol requires @catalogId.",
+                _ => "The fixture expects abstract selection from a per-surface supportedCatalogIds list. Core resolves concrete items from the session registry."
+            };
+
+        if (file == "conformance/core/message_processor_v1_0.yaml")
+            return id switch
+            {
+                "test_v10_legacy_catalog_id_routes_by_default_catalog_schema" or
+                "test_v10_legacy_catalog_id_routes_when_target_declares_non_string_catalog_id" or
+                "test_v10_function_call_without_catalog_id_uses_surface_default" or
+                "test_v10_calls_in_lists_naming_their_catalog" or
+                "test_v10_index_function_on_surface_without_default" or
+                "test_v10_nested_call_in_args_on_surface_without_default_errors" or
+                "test_v10_call_in_index_args_on_surface_without_default_errors" =>
+                    "The fixture routes components using bare catalogId. The pinned wire protocol requires @catalogId.",
+                "test_v10_call_to_undeclared_function_without_strict_mode_accepted" =>
+                    "Core validates function declarations even when progressive graph validation is enabled.",
+                "test_v10_call_naming_catalog_of_other_protocol_version_errors" =>
+                    "The fixture registers a legacy catalog. The registry rejects it at registration.",
+                _ => null
+            };
+
+        if (file != "conformance/core/catalog.yaml" || !test.GetProperty("action").ValueEquals("from_json"))
+            return null;
+
+        return id switch
+        {
+            "test_v09_catalog_from_json_user_activation_agent_only_loads" or
+            "test_v09_catalog_from_json_allows_hyphen_identifiers" => "Legacy protocol is outside the profile.",
+            "test_v10_uax31_invalid_argument_name" =>
+                "The fixture uses a parameters map. The pinned schema declares arguments under properties/args.",
+            "test_v10_catalog_from_json_leaf_defs" =>
+                "The fixture uses metadata.displayName, which the pinned catalog schema does not allow.",
+            "test_catalog_from_json_override_catalog_id" => "The registry uses the document identity and has no catalog ID override.",
+            "test_v10_catalog_from_json_filters_entries_by_unions" => "The registry retains declared entries. Union-based transformation belongs to #67.",
+            "test_v10_catalog_from_json_v1_0_attributes" or
+            "test_v10_catalog_from_json_user_activation_renderer_only" or
+            "test_v10_catalog_from_json_uax31_validation" or
+            "test_v10_uax31_valid_non_ascii_identifier" =>
+                "The fixture omits required 1.0 function schema fields.",
+            "test_v10_published_basic_catalog_validates_nested_calls" =>
+                "The fixture allows calls to unregistered catalogs during standalone validation. Core validates calls against the registry.",
+            _ => null
+        };
+    }
+
+    internal static bool Supports(string file, string id, JsonElement test) => (file, id) switch
     {
         ("conformance/core/expressions.yaml", _) => true,
+        ("conformance/core/catalog.yaml", _) when test.GetProperty("action").ValueEquals("from_json") => true,
+        ("conformance/core/multi_catalog.yaml", "test_multi_catalog_function_call_catalog_id_override" or
+            "test_multi_catalog_version_mismatch_error") => true,
+        ("conformance/core/message_processor_v1_0.yaml",
+            "test_v10_get_renderer_capabilities" or "test_v10_get_renderer_capabilities_inline_catalogs" or
+            "test_v10_function_call_naming_catalog_without_that_function_errors" or
+            "test_v10_function_call_naming_catalog_with_invalid_args_errors" or
+            "test_v10_function_call_naming_catalog_with_valid_args" or
+            "test_v10_strict_function_call_to_schema_only_function_of_surface_catalog" or
+            "test_v10_function_call_naming_unknown_catalog_errors" or "test_v10_function_call_with_empty_catalog_id_errors" or
+            "test_v10_function_call_without_catalog_id_uses_surface_default" or
+            "test_v10_function_call_without_catalog_id_to_unknown_function_errors" or
+            "test_v10_function_call_without_catalog_id_on_surface_without_default_errors" or
+            "test_v10_index_function_on_surface_with_default" or
+            "test_v10_nested_call_in_args_resolves_its_own_catalog" or "test_v10_nested_call_in_args_naming_its_catalog" or
+            "test_v10_call_in_index_args_is_checked" or
+            "test_v10_call_in_list_without_catalog_id_uses_surface_default" or
+            "test_v10_call_in_list_with_invalid_args_errors" or "test_v10_undefined_system_function_errors" or
+            "test_v10_function_call_with_empty_name_errors" or
+            "test_v10_call_without_catalog_id_on_surface_without_default_errors_without_strict_mode" or
+            "test_v10_call_naming_unknown_catalog_errors_without_strict_mode") => true,
         ("conformance/core/data_model_pointers.yaml" or "conformance/core/data_deletion.yaml", _) => true,
         ("conformance/core/validator_v1_0.yaml", _) when id.StartsWith("test_v10_topology_", StringComparison.Ordinal) ||
             id.StartsWith("test_v10_component_nesting_depth_", StringComparison.Ordinal) ||
@@ -67,11 +142,6 @@ internal static class CoreCases
             "test_v10_extensions_keys_are_unicode_identifiers" or "test_v10_component_metadata_only_holds_extensions" or
             "test_v10_component_common_rejects_null_catalog_id" or "test_v10_function_call_rejects_unknown_keys") => true,
         ("conformance/core/catalog.yaml", "test_v10_basic_catalog_to_json" or "test_v10_basic_catalog_round_trip" or
-            "test_v10_catalog_from_json_rejects_ref_to_another_catalog" or
-            "test_v10_catalog_from_json_rejects_absolute_uri_ref" or "test_v10_catalog_from_json_rejects_external_ref_in_function_args" or
-            "test_v10_catalog_from_json_accepts_local_and_common_types_refs") => true,
-        ("conformance/core/catalog.yaml", "test_v10_catalog_from_json_component_metadata" or
-            "test_v10_catalog_from_json_component_metadata_invalid_uax31_key_error" or
             "test_v10_component_metadata_catalog_round_trip") => true,
         _ => false
     };
@@ -95,6 +165,17 @@ internal static class CoreCases
                 }
                 else
                     Require(parsed && Equal(test.GetProperty("expect"), parts), parseError?.ToString() ?? "Parsed parts differ.");
+                break;
+            case "conformance/core/multi_catalog.yaml":
+                RunMixedCatalog(test, assets);
+                break;
+            case "conformance/core/message_processor_v1_0.yaml"
+                when test.GetProperty("action").ValueEquals("get_renderer_capabilities"):
+                var registry = new CatalogRegistry(includeBasicCatalog: false);
+                foreach (var definition in test.GetProperty("catalogs").EnumerateArray())
+                    RegisterCatalog(registry, JsonNode.Parse(definition.GetRawText())!.AsObject());
+                var capabilities = registry.CreateRendererCapabilities(test.GetProperty("args").GetProperty("includeInlineCatalogs").GetBoolean());
+                Require(Equal(capabilities.Value, test.GetProperty("expect")), "Renderer capabilities differ.");
                 break;
             case "conformance/core/message_processor_v1_0.yaml":
             case "conformance/core/validator_v1_0.yaml":
@@ -263,23 +344,72 @@ internal static class CoreCases
         }
     }
 
+    private static void RunMixedCatalog(JsonElement test, string assets)
+    {
+        if (test.GetProperty("action").ValueEquals("select_catalog"))
+        {
+            var mixedRegistry = new CatalogRegistry(includeBasicCatalog: false);
+            foreach (var catalog in test.GetProperty("args").GetProperty("catalogs").EnumerateObject())
+            {
+                var definition = JsonNode.Parse(catalog.Value.GetRawText())!.AsObject();
+                definition["catalogId"] = catalog.Name;
+                var registered = mixedRegistry.TryRegister(Encoding.UTF8.GetBytes(definition.ToJsonString()), out var diagnostic);
+                var supported = catalog.Value.GetProperty("protocolVersion").ValueEquals(WireMessage.Version);
+                Require(supported ? registered : !registered && diagnostic?.Code == "unsupportedVersion",
+                    diagnostic?.ToString() ?? "Catalog version outcome differs.");
+            }
+            return;
+        }
+
+        var registry = BuildRegistry(test, assets, repairMixedCatalogReference: true);
+        using var session = new SurfaceSession(registry);
+        foreach (var step in test.GetProperty("steps").EnumerateArray())
+            RunStep(session, step, validate: true);
+
+        foreach (var surface in test.GetProperty("expect").GetProperty("surfaces").EnumerateObject())
+        {
+            using var resolver = new NodeResolver(session, registry, surface.Name);
+            foreach (var component in surface.Value.GetProperty("components").EnumerateObject())
+            {
+                var node = resolver.Nodes.Single(item => item.ComponentId == component.Name);
+                foreach (var property in component.Value.EnumerateObject())
+                    Require(property.NameEquals("component")
+                            ? property.Value.ValueEquals(node.ComponentType)
+                            : node.Props.TryGetValue(property.Name, out var actual) && actual.Value is { } value &&
+                              Equal(value, property.Value),
+                        $"Resolved property {property.Name} differs.");
+            }
+        }
+    }
+
     private static void RunCatalog(JsonElement test, string assets)
     {
         if (test.GetProperty("action").ValueEquals("from_json"))
         {
-            var customRegistry = new CatalogRegistry();
+            var customRegistry = new CatalogRegistry(includeBasicCatalog: false);
             var fromFile = test.TryGetProperty("catalogPath", out var catalogPath);
             var definitionBytes = fromFile ? File.ReadAllBytes(Path.Combine(assets, catalogPath.GetString()!))
-                : Encoding.UTF8.GetBytes(test.GetProperty("catalog").GetRawText());
+                : CatalogFixtureBytes(test);
             using var inputDocument = JsonDocument.Parse(definitionBytes);
             var input = inputDocument.RootElement;
             var registered = customRegistry.TryRegister(definitionBytes, out var diagnostic);
             if (test.TryGetProperty("expectError", out _))
             {
-                Require(!registered && (fromFile
-                    ? diagnostic?.Path.Contains("/metadata/extensions", StringComparison.Ordinal) == true
-                    : diagnostic?.Code == "unresolvedReference"),
-                    diagnostic?.ToString() ?? "Expected catalog registration to fail.");
+                Require(!registered, "Expected catalog registration to fail.");
+                var id = test.GetProperty("name").GetString()!;
+                if (id == "test_catalog_from_json_missing_catalog_id_error")
+                    Require(diagnostic?.Code == "invalidCatalogId", diagnostic?.ToString() ?? "Expected a missing catalog ID diagnostic.");
+                if (id == "test_v10_catalog_from_json_component_metadata_invalid_uax31_key_error")
+                    Require(diagnostic?.Path.Contains("/metadata/extensions", StringComparison.Ordinal) == true,
+                        diagnostic?.ToString() ?? "Expected an extension name diagnostic.");
+                if (id.Contains("user_activation", StringComparison.Ordinal))
+                    Require(diagnostic?.Path.EndsWith("/requiresUserActivation", StringComparison.Ordinal) == true,
+                        diagnostic?.ToString() ?? "Expected an activation diagnostic.");
+                if (test.GetProperty("expectError").TryGetProperty("message", out var message) &&
+                    message.ValueEquals("Unsupported external $ref"))
+                    Require(diagnostic?.Code == "unresolvedReference", diagnostic?.ToString() ?? "Expected an offline reference diagnostic.");
+                if ((id.Contains("uax31", StringComparison.Ordinal) && !fromFile) || id.Contains("prefixed_function", StringComparison.Ordinal))
+                    Require(diagnostic?.Code == "invalidCatalogItem", diagnostic?.ToString() ?? "Expected an identifier diagnostic.");
                 return;
             }
             Require(registered, diagnostic?.ToString() ?? "Catalog registration failed.");
@@ -294,6 +424,16 @@ internal static class CoreCases
                                     .SequenceEqual(property.Value.EnumerateArray().Select(item => item.GetString()).Order(StringComparer.Ordinal))
                                 : Equal(property.Value, actual)),
                             $"Catalog field {property.Name} differs.");
+                foreach (var (field, valid) in new[] { ("validComponents", true), ("invalidComponents", false) })
+                    if (expected.TryGetProperty(field, out var fixtures))
+                        foreach (var component in fixtures.EnumerateArray())
+                        {
+                            var rejection = customRegistry.ValidateComponent(component, input.GetProperty("catalogId").GetString());
+                            Require((rejection is null) == valid, rejection?.ToString() ?? "Expected a component rejection.");
+                        }
+                if (expected.TryGetProperty("matchesBuiltinCatalog", out var matches) && matches.GetBoolean())
+                    Require(new CatalogRegistry().TryGetDefinition(CatalogRegistry.BasicCatalogId, out var basic) &&
+                        Equal(definition, basic), "Published Basic Catalog differs from the built-in definition.");
                 if (expected.TryGetProperty("componentMetadata", out var metadata))
                     foreach (var component in metadata.EnumerateObject())
                     {
@@ -316,6 +456,15 @@ internal static class CoreCases
         Require(Equal(catalog, published.RootElement), "Published catalog differs.");
     }
 
+    private static byte[] CatalogFixtureBytes(JsonElement test)
+    {
+        var definition = JsonNode.Parse(test.GetProperty("catalog").GetRawText())!.AsObject();
+        definition["protocolVersion"] ??= WireMessage.Version;
+        if (test.TryGetProperty("catalogId", out var id))
+            definition["catalogId"] ??= id.GetString();
+        return Encoding.UTF8.GetBytes(definition.ToJsonString());
+    }
+
     private static void RunLifecycle(JsonElement test, string assets)
     {
         var registry = BuildRegistry(test, assets);
@@ -333,7 +482,7 @@ internal static class CoreCases
     }
 
     // The registry holds the pinned Basic Catalog under the aliases the fixtures use, plus any catalogs the case declares.
-    internal static CatalogRegistry BuildRegistry(JsonElement test, string assets)
+    internal static CatalogRegistry BuildRegistry(JsonElement test, string assets, bool repairMixedCatalogReference = false)
     {
         var catalog = JsonNode.Parse(File.ReadAllBytes(Path.Combine(assets, "catalogs/basic/v1/catalog.json")))!;
         var registry = new CatalogRegistry();
@@ -351,7 +500,16 @@ internal static class CoreCases
         if (test.TryGetProperty("catalogs", out var definitions) && definitions.ValueKind == JsonValueKind.Array)
             foreach (var definition in definitions.EnumerateArray())
                 if (definition.TryGetProperty("catalogId", out _))
-                    RegisterCatalog(registry, JsonNode.Parse(definition.GetRawText())!.AsObject());
+                {
+                    var authored = JsonNode.Parse(definition.GetRawText())!.AsObject();
+                    if (repairMixedCatalogReference)
+                    {
+                        // This fixture references a local DynamicString that it does not define.
+                        authored["components"]!["Text"]!["properties"]!["text"]!["$ref"] =
+                            "common_types.json#/$defs/DynamicString";
+                    }
+                    RegisterCatalog(registry, authored);
+                }
         return registry;
     }
 
@@ -406,7 +564,7 @@ internal static class CoreCases
                 "unknownSurface" or "duplicateSurface" or "duplicateComponent" or "circularReference" or "missingRoot" or
                     "orphanComponent" or "danglingReference" or "unallowedParent" or "unallowedChild" or "graphDepth" => "IntegrityError",
                 "invalidDataPath" => "DataError",
-                "unknownCatalog" when !validate => "CatalogError",
+                "unknownCatalog" => "CatalogError",
                 "unsupportedMessage" => null,
                 _ => "ValidationError"
             };
