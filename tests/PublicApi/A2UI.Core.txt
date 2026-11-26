@@ -8,6 +8,8 @@ C A2UI.Core.AgentFunctionOutcome [Public, HideBySig, SpecialName, RTSpecialName]
 C A2UI.Core.CatalogRegistry [Public, HideBySig, SpecialName, RTSpecialName] (System.Boolean includeBasicCatalog [Optional, HasDefault] = True)
 C A2UI.Core.CheckResult [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Core.CheckState State [None], A2UI.Core.ValidationResult? Result [None])
 C A2UI.Core.ComponentOccurrence [Public, HideBySig, SpecialName, RTSpecialName] (System.String InstanceId [None], System.String ComponentId [None], System.String ComponentType [None], System.String DataPath [None], System.Text.Json.JsonElement Definition [None], System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.ComponentOccurrence] Children [None], System.String Position [None])
+C A2UI.Core.DataModel [Public, HideBySig, SpecialName, RTSpecialName] ()
+C A2UI.Core.DataModel [Public, HideBySig, SpecialName, RTSpecialName] (System.Text.Json.JsonElement initial [None])
 C A2UI.Core.FunctionCallRouter [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Core.SurfaceSession session [None], A2UI.Core.CatalogRegistry catalogs [None], A2UI.Core.FunctionEvaluator functions [None], A2UI.Core.AgentFunctionClient? agent [None], System.TimeProvider? timeProvider [Optional, HasDefault] = )
 C A2UI.Core.FunctionEvaluator [Public, HideBySig, SpecialName, RTSpecialName] (A2UI.Core.CatalogRegistry catalogs [None], System.Action`1[T][System.Uri]? openUrl [Optional, HasDefault] = )
 C A2UI.Core.GraphValidationOptions [Public, HideBySig, SpecialName, RTSpecialName] ()
@@ -146,6 +148,14 @@ M A2UI.Core.ComponentOccurrence.set_DataPath [Public, HideBySig, SpecialName] ->
 M A2UI.Core.ComponentOccurrence.set_Definition [Public, HideBySig, SpecialName] -> System.Void (System.Text.Json.JsonElement value [None])
 M A2UI.Core.ComponentOccurrence.set_InstanceId [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
 M A2UI.Core.ComponentOccurrence.set_Position [Public, HideBySig, SpecialName] -> System.Void (System.String value [None])
+M A2UI.Core.DataModel.Delete [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic? (System.String path [None])
+M A2UI.Core.DataModel.Dispose [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Void ()
+M A2UI.Core.DataModel.Get [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic? (System.String path [None], System.Text.Json.JsonElement& value [Out])
+M A2UI.Core.DataModel.Observe [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic? (System.String path [None], System.Action`1[T][System.Text.Json.JsonElement] observer [None], A2UI.Core.DataSubscription?& subscription [Out])
+M A2UI.Core.DataModel.Set [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic? (System.String path [None], System.Text.Json.JsonElement value [None])
+M A2UI.Core.DataModel.get_Value [Public, HideBySig, SpecialName] -> System.Text.Json.JsonElement ()
+M A2UI.Core.DataSubscription.Dispose [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Void ()
+M A2UI.Core.DataSubscription.get_Value [Public, HideBySig, SpecialName] -> System.Text.Json.JsonElement ()
 M A2UI.Core.ExpressionTemplate.TryEvaluate [Public, Static, HideBySig] -> System.Boolean (System.String template [None], System.Text.Json.JsonElement dataModel [None], System.Text.Json.JsonElement scope [None], System.String? catalogId [None], System.Func`4[T1,T2,T3,TResult][System.String?, System.String, System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, System.Text.Json.JsonElement], System.Text.Json.JsonElement]? invoke [None], System.String?& result [Out], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
 M A2UI.Core.ExpressionTemplate.TryParse [Public, Static, HideBySig] -> System.Boolean (System.String template [None], System.Text.Json.JsonElement& parts [Out], A2UI.Core.A2uiDiagnostic?& diagnostic [Out])
 M A2UI.Core.FunctionBinding.Dispose [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Void ()
@@ -375,6 +385,8 @@ P A2UI.Core.ComponentOccurrence.DataPath : System.String () init
 P A2UI.Core.ComponentOccurrence.Definition : System.Text.Json.JsonElement () init
 P A2UI.Core.ComponentOccurrence.InstanceId : System.String () init
 P A2UI.Core.ComponentOccurrence.Position : System.String () init
+P A2UI.Core.DataModel.Value : System.Text.Json.JsonElement ()
+P A2UI.Core.DataSubscription.Value : System.Text.Json.JsonElement ()
 P A2UI.Core.FunctionBinding.HasFailed : System.Boolean ()
 P A2UI.Core.FunctionBinding.IsPending : System.Boolean ()
 P A2UI.Core.FunctionBinding.Passes : System.Boolean ()
@@ -448,6 +460,8 @@ T A2UI.Core.CatalogRegistry [Public, Sealed, BeforeFieldInit] : System.Object []
 T A2UI.Core.CheckResult [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Core.CheckResult]]
 T A2UI.Core.CheckState [Public, Sealed] : System.Enum [System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable]
 T A2UI.Core.ComponentOccurrence [Public, Sealed, BeforeFieldInit] : System.Object [System.IEquatable`1[A2UI.Core.ComponentOccurrence]]
+T A2UI.Core.DataModel [Public, Sealed, BeforeFieldInit] : System.Object [System.IDisposable]
+T A2UI.Core.DataSubscription [Public, Sealed, BeforeFieldInit] : System.Object [System.IDisposable]
 T A2UI.Core.ExpressionTemplate [Public, Abstract, Sealed, BeforeFieldInit] : System.Object []
 T A2UI.Core.FunctionBinding [Public, Sealed, BeforeFieldInit] : System.Object [System.IDisposable]
 T A2UI.Core.FunctionCallRouter [Public, Sealed, BeforeFieldInit] : System.Object [System.IDisposable]

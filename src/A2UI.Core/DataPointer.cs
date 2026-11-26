@@ -4,19 +4,39 @@ using System.Text.Json.Nodes;
 
 namespace A2UI.Core;
 
+internal enum DataWriteFailureKind
+{
+    None,
+    ThroughPrimitive,
+    NonNumericSegment,
+    IndexTooLarge,
+    Unrepresentable
+}
+
+/// <summary>Why a write was refused and the path segment that caused it.</summary>
+internal readonly record struct DataWriteFailure(DataWriteFailureKind Kind, string Segment = "");
+
 internal static class DataPointer
 {
+    /// <summary>The highest list index a write may address. A write past the end pads the list with null up to the index.</summary>
+    internal const int MaxListIndex = 10_000;
+
     private static readonly JsonElement EmptyRoot = ProtocolSchemas.Parse("{}");
 
-    internal static bool TryParse(string path, out string[] segments)
+    internal static bool TryParse(string path, out string[] segments) => TryParse(path, dropEmptySegments: false, out segments);
+
+    /// <summary>Parses an absolute pointer. With <paramref name="dropEmptySegments"/> an empty path is the root and repeated or trailing slashes collapse.</summary>
+    internal static bool TryParse(string path, bool dropEmptySegments, out string[] segments)
     {
         segments = [];
-        if (path == "/")
+        if (path == "/" || (dropEmptySegments && path.Length == 0))
             return true;
         if (!path.StartsWith('/'))
             return false;
 
-        segments = path[1..].Split('/');
+        segments = dropEmptySegments
+            ? path.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            : path[1..].Split('/');
         if (segments.Length > 63)
             return false;
         for (var i = 0; i < segments.Length; i++)
@@ -47,22 +67,37 @@ internal static class DataPointer
                     return false;
             }
         }
+
         result = value;
         return true;
     }
 
-    internal static bool TryUpdate(JsonElement root, string[] segments, JsonElement value, out JsonElement result)
+    internal static bool TryUpdate(JsonElement root, string[] segments, JsonElement value, out JsonElement result) =>
+        TryUpdate(root, segments, value, out result, out _);
+
+    /// <summary>
+    /// Writes <paramref name="value"/> at the path. A null value removes the member, or empties a list slot, and does nothing
+    /// when the path holds no value. A refused write leaves <paramref name="result"/> as the unchanged root.
+    /// </summary>
+    internal static bool TryUpdate(JsonElement root, string[] segments, JsonElement value, out JsonElement result,
+        out DataWriteFailure failure)
     {
         result = root;
+        failure = default;
         var deleting = value.ValueKind == JsonValueKind.Null;
         if (segments.Length == 0)
         {
-            result = deleting ? EmptyRoot : value;
+            // Clone so that the model never depends on a document the caller may dispose.
+            result = deleting ? EmptyRoot : value.Clone();
             return true;
         }
 
+        if (deleting && !TryGet(root, segments, out _))
+            return true;
+
         var candidate = JsonNode.Parse(root.GetRawText());
-        if (!TrySet(candidate, segments, 0, deleting ? null : JsonNode.Parse(value.GetRawText())))
+        failure = Set(candidate, segments, 0, deleting ? null : JsonNode.Parse(value.GetRawText()));
+        if (failure.Kind != DataWriteFailureKind.None)
             return false;
         try
         {
@@ -71,11 +106,12 @@ internal static class DataPointer
         }
         catch (JsonException)
         {
+            failure = new(DataWriteFailureKind.Unrepresentable);
             return false;
         }
     }
 
-    private static bool TrySet(JsonNode? container, string[] segments, int depth, JsonNode? value)
+    private static DataWriteFailure Set(JsonNode? container, string[] segments, int depth, JsonNode? value)
     {
         var key = segments[depth];
         var leaf = depth == segments.Length - 1;
@@ -88,42 +124,54 @@ internal static class DataPointer
                         obj.Remove(key);
                     else
                         obj[key] = value;
-                    return true;
+                    return default;
                 }
-                if (!obj.TryGetPropertyValue(key, out var child))
-                {
-                    if (value is null)
-                        return true;
+
+                // An explicit null is a placeholder that a write replaces with a container.
+                if (!obj.TryGetPropertyValue(key, out var child) || child is null)
                     obj[key] = child = CreateContainer(segments[depth + 1]);
-                }
-                return TrySet(child, segments, depth + 1, value);
-            case JsonArray array when TryIndex(key, out var index) && index <= array.Count:
-                if (index == array.Count)
-                {
-                    if (value is null)
-                        return true;
-                    array.Add(leaf ? value : CreateContainer(segments[depth + 1]));
-                    return leaf || TrySet(array[index], segments, depth + 1, value);
-                }
+                return Set(child, segments, depth + 1, value);
+            case JsonArray array:
+                var kind = ClassifyIndex(key, out var index);
+                if (kind == IndexKind.NotIndex)
+                    return new(DataWriteFailureKind.NonNumericSegment, key);
+                if (kind == IndexKind.TooLarge || index > MaxListIndex)
+                    return new(DataWriteFailureKind.IndexTooLarge, key);
+                while (array.Count <= index)
+                    array.Add(null);
                 if (leaf)
                 {
                     array[index] = value;
-                    return true;
+                    return default;
                 }
-                return TrySet(array[index], segments, depth + 1, value);
+
+                var element = array[index];
+                if (element is null)
+                    array[index] = element = CreateContainer(segments[depth + 1]);
+                return Set(element, segments, depth + 1, value);
             default:
-                return false;
+                return new(DataWriteFailureKind.ThroughPrimitive, key);
         }
     }
 
+    // A segment that is only digits, without a leading zero, creates a list. Any other segment creates an object.
     private static JsonNode CreateContainer(string next) =>
-        TryIndex(next, out _) ? new JsonArray() : new JsonObject();
+        ClassifyIndex(next, out _) == IndexKind.NotIndex ? new JsonObject() : new JsonArray();
 
-    private static bool TryIndex(string segment, out int index)
+    private static bool TryIndex(string segment, out int index) => ClassifyIndex(segment, out index) == IndexKind.Index;
+
+    private static IndexKind ClassifyIndex(string segment, out int index)
     {
         index = 0;
-        return segment.Length != 0 && !segment.AsSpan().ContainsAnyExceptInRange('0', '9') &&
-            (segment.Length == 1 || segment[0] != '0') &&
-            int.TryParse(segment, NumberStyles.None, CultureInfo.InvariantCulture, out index);
+        if (segment.Length == 0 || segment.AsSpan().ContainsAnyExceptInRange('0', '9') || (segment.Length > 1 && segment[0] == '0'))
+            return IndexKind.NotIndex;
+        return int.TryParse(segment, NumberStyles.None, CultureInfo.InvariantCulture, out index) ? IndexKind.Index : IndexKind.TooLarge;
+    }
+
+    private enum IndexKind
+    {
+        NotIndex,
+        Index,
+        TooLarge
     }
 }
