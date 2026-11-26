@@ -60,6 +60,9 @@ foreach (var suite in new[] { "core", "agent" })
                     when FunctionCases.ExclusionReason(path, test) is { } why => why,
                 (_, _, "conformance/core/node_resolution.yaml") when NodeCases.Supports(id) => null,
                 (_, _, "conformance/core/node_resolution.yaml") => NodeCases.ExclusionReason(test, assets),
+                (_, _, RendererFunctionCases.Path) when id == "test_call_renderer_function_checked_rejects_a_function_that_needs_user_activation" =>
+                    "The fixture pairs requiresUserActivation with rendererOrAgent. The pinned catalog schema only allows this requirement on rendererOnly functions.",
+                _ when !scaling && path == RendererFunctionCases.Path => null,
                 _ when !scaling && path == AgentFunctionCases.Path => null,
                 _ when !scaling && AgentCases.Supports(path, test) => null,
                 (_, _, "conformance/agent/direct_json/response_streaming.yaml") when test.GetProperty("args").GetRawText()
@@ -101,6 +104,8 @@ foreach (var suite in new[] { "core", "agent" })
                         Console.WriteLine($"{id} {AgentScaling.Run(test, assets)}");
                     else if (runScaling)
                         Console.WriteLine($"{id} {CoreScaling.Run(test, assets)}");
+                    else if (path == RendererFunctionCases.Path)
+                        RendererFunctionCases.Run(test);
                     else if (path == AgentFunctionCases.Path)
                         AgentFunctionCases.Run(test, assets);
                     else if (suite == "agent")

@@ -38,6 +38,14 @@ public sealed class RequestProcessor
         RendererMessageHandler? onRendererFunctionResponse = null) =>
         new(_catalogs, functions, onAction, onError, onRendererFunctionResponse);
 
+    /// <summary>Creates a conversation-local client that checks renderer function calls against the selected catalogs.</summary>
+    /// <param name="maxPendingCalls">The maximum number of concurrent calls. The default is 256.</param>
+    /// <param name="defaultTimeout">The per-call timeout when none is specified. The default is 30 seconds.</param>
+    /// <param name="timeProvider">The clock for call timeouts. Defaults to <see cref="TimeProvider.System"/>.</param>
+    /// <returns>The client. Deliver decoded replies via <see cref="RendererFunctionClient.TryHandleResponse"/>.</returns>
+    public RendererFunctionClient CreateRendererFunctionClient(int maxPendingCalls = 256, TimeSpan? defaultTimeout = null,
+        TimeProvider? timeProvider = null) => new(_catalogs, maxPendingCalls, defaultTimeout, timeProvider);
+
     /// <summary>Negotiates a request against renderer capabilities.</summary>
     /// <param name="registered">The configured catalog registry.</param>
     /// <param name="capabilities">The required renderer capabilities.</param>
