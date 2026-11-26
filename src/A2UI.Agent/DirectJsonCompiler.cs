@@ -20,6 +20,15 @@ public static partial class DirectJson
         messages = Array.Empty<WireMessage>();
         if (parseError is not null)
             return parseError;
+        if (Validate(decoded, catalogs) is { } validationError)
+            return validationError;
+        messages = decoded;
+        return null;
+    }
+
+    /// <summary>Checks decoded messages against the active catalogs and the lifecycle of the surfaces they name.</summary>
+    internal static A2uiDiagnostic? Validate(IReadOnlyList<WireMessage> decoded, CatalogRegistry catalogs)
+    {
         var created = decoded.Where(m => m.Kind == "createSurface")
             .Select(m => m.Payload.GetProperty("surfaceId").GetString()!).ToHashSet(StringComparer.Ordinal);
         var surfaces = new Dictionary<string, string?>(StringComparer.Ordinal);
@@ -54,7 +63,6 @@ public static partial class DirectJson
                 CheckCall(payload.GetProperty("callFunction"), catalog, catalogs, true, id is not null) is { } callError)
                 return callError;
         }
-        messages = decoded;
         return null;
     }
 
