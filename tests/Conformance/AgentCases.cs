@@ -355,9 +355,9 @@ internal static class AgentCases
             Require(prompt!.ToSkill().Split("---\n", 3)[2].Trim() == prompt.Text.Trim(), "Skill body differs.");
     }
 
-    private static void CheckCompiler(JsonElement test, string assets)
+    /// <summary>Registers the catalogs a compiler case names in <c>args.catalog</c> or <c>args.catalogs</c>.</summary>
+    internal static CatalogRegistry RegisterCatalogs(JsonElement args, string assets)
     {
-        var args = test.GetProperty("args");
         var registry = new CatalogRegistry(false);
         var files = args.TryGetProperty("catalog", out var catalog)
             ? new[] { catalog } : args.GetProperty("catalogs").EnumerateArray().ToArray();
@@ -375,6 +375,14 @@ internal static class AgentCases
             }
             Require(registry.TryRegister(bytes, out var error), error?.ToString() ?? "Catalog registration failed.");
         }
+
+        return registry;
+    }
+
+    private static void CheckCompiler(JsonElement test, string assets)
+    {
+        var args = test.GetProperty("args");
+        var registry = RegisterCatalogs(args, assets);
         if (test.GetProperty("action").ValueEquals("parse_response"))
         {
             using var state = new RendererState(registry);
@@ -472,7 +480,7 @@ internal static class AgentCases
                     !item.TryGetProperty("is_final", out var final) || final.GetBoolean())).ToArray();
     }
 
-    private static void RunRendererState(JsonElement test, string assets)
+    internal static void RunRendererState(JsonElement test, string assets)
     {
         var registry = new CatalogRegistry(false);
         foreach (var catalog in test.GetProperty("catalogs").EnumerateArray())
@@ -498,10 +506,17 @@ internal static class AgentCases
             }
             else
             {
-                diagnostic = DirectJson.ParseResponse(step.GetProperty("response").GetString()!, state, out var parts, out candidate);
-                foreach (var part in parts)
-                    if (part.Messages is not null)
-                        messages.AddRange(part.Messages);
+                var response = step.GetProperty("response").GetString()!;
+                if (step.TryGetProperty("format", out var format) && format.ValueEquals("express"))
+                {
+                    diagnostic = Express.ParseResponse(response, state, out var expressParts, out candidate);
+                    messages.AddRange(expressParts.Where(part => part.Messages is not null).SelectMany(part => part.Messages!));
+                }
+                else
+                {
+                    diagnostic = DirectJson.ParseResponse(response, state, out var parts, out candidate);
+                    messages.AddRange(parts.Where(part => part.Messages is not null).SelectMany(part => part.Messages!));
+                }
             }
             if (step.TryGetProperty("expect_error", out var expectedError))
             {
@@ -538,7 +553,7 @@ internal static class AgentCases
                 System.Text.Json.Nodes.JsonNode.Parse(expected.GetRawText())), "Renderer snapshot differs.");
     }
 
-    private static void Require(bool condition, string description)
+    internal static void Require(bool condition, string description)
     {
         if (!condition)
             throw new InvalidDataException(description);

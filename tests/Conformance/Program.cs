@@ -11,7 +11,8 @@ var assets = Path.GetFullPath(args[0]);
 var scaling = args.Length == 3;
 using var baseline = JsonDocument.Parse(File.ReadAllText("upstream/a2ui-baseline.json"));
 var revision = baseline.RootElement.GetProperty("revision").GetString();
-var yaml = new DeserializerBuilder().WithAttemptingUnquotedStringTypeDeserialization().Build();
+var yaml = new DeserializerBuilder().WithAttemptingUnquotedStringTypeDeserialization()
+    .WithNodeDeserializer(new DoubleScalarDeserializer(), syntax => syntax.OnTop()).Build();
 var results = new List<CaseResult>();
 
 foreach (var suite in new[] { "core", "agent" })
@@ -37,8 +38,8 @@ foreach (var suite in new[] { "core", "agent" })
                 ?? ReadString(document, "protocolVersion") ?? ReadString(document, "version");
             var runScaling = scaling && path == "conformance/core/message_processor_scaling.yaml" &&
                 id is "test_scaling_process_single_component_messages_relaxed_v10" or "test_scaling_process_single_component_messages_composition_v10";
-            var agentScaling = scaling && path == "conformance/agent/direct_json/scaling.yaml" &&
-                !id.EndsWith("_v09", StringComparison.Ordinal);
+            var agentScaling = scaling && (path == "conformance/agent/direct_json/scaling.yaml" &&
+                !id.EndsWith("_v09", StringComparison.Ordinal) || path == "conformance/agent/express/scaling.yaml");
             string? reason = (isScaling != scaling, version, path) switch
             {
                 (true, _, _) => "Run mode excludes this case.",
@@ -74,6 +75,8 @@ foreach (var suite in new[] { "core", "agent" })
                 (_, _, MacroCases.Path) when id == "36_surface_lifecycle_delete_recreate_and_null_catalog_id" =>
                     "The case sends \"@catalogId\": null. The pinned message schema requires a string and Core rejects the null when it decodes the message, so the expander never sees it.",
                 _ when !scaling && path == MacroCases.Path => null,
+                _ when suite == "agent" && ExpressCases.ExclusionReason(path, test) is { } expressReason => expressReason,
+                _ when !scaling && suite == "agent" && ExpressCases.IsExpress(path, test) => null,
                 _ when !scaling && AgentCases.Supports(path, test) => null,
                 (_, _, "conformance/agent/direct_json/response_streaming.yaml") when test.GetProperty("args").GetRawText()
                     .Contains("catalog_v0_", StringComparison.Ordinal) => "Legacy protocol is outside the profile.",
@@ -120,6 +123,8 @@ foreach (var suite in new[] { "core", "agent" })
                         AgentFunctionCases.Run(test, assets);
                     else if (path == MacroCases.Path)
                         MacroCases.Run(test, document, assets);
+                    else if (suite == "agent" && ExpressCases.IsExpress(path, test))
+                        ExpressCases.Run(test, assets);
                     else if (suite == "agent")
                         AgentCases.Run(test, assets);
                     else if (OutboundCases.Handles(path))
@@ -149,6 +154,12 @@ foreach (var suite in new[] { "core", "agent" })
         }
     }
 }
+
+foreach (var (file, skip, failure) in ExpressCases.RunGoldenCorpus(assets, run: !scaling))
+    {
+        var status = skip is not null ? "excluded" : failure is null ? "pass" : "fail";
+        results.Add(new("agent", file, "test_express_specification_round_trip_" + Path.GetFileNameWithoutExtension(file), null, status, skip ?? failure?.Message));
+    }
 
 File.WriteAllText(args[1], JsonSerializer.Serialize(new { revision, scaling, results },
     new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));

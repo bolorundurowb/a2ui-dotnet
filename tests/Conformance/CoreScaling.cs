@@ -67,6 +67,12 @@ internal static class CoreScaling
 
     internal static JsonElement Expand(JsonElement payload, int size)
     {
+        using var doc = JsonDocument.Parse(ExpandText(payload, size));
+        return doc.RootElement.Clone();
+    }
+
+    internal static string ExpandText(JsonElement payload, int size)
+    {
         var builder = new StringBuilder();
         foreach (var part in payload.EnumerateArray())
         {
@@ -84,7 +90,6 @@ internal static class CoreScaling
                 builder.Append(template.Replace("{i}", i.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal));
             }
         }
-        using var doc = JsonDocument.Parse(builder.ToString());
-        return doc.RootElement.Clone();
+        return builder.ToString();
     }
 }

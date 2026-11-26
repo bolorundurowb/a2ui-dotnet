@@ -13,6 +13,7 @@ internal static class AgentScaling
             throw new InvalidDataException(diagnostic?.ToString());
         var keys = args.TryGetProperty("progressive_keys", out var keyList)
             ? keyList.EnumerateArray().Select(k => k.GetString()!).ToArray() : [];
+        var express = args.TryGetProperty("format", out var format) && format.ValueEquals("express");
         var overhead = test.TryGetProperty("size", out var size);
         var small = Payload(overhead ? size.GetInt32() : test.GetProperty("sizes")[0].GetInt32());
         var large = overhead ? small : Payload(test.GetProperty("sizes")[1].GetInt32());
@@ -35,7 +36,9 @@ internal static class AgentScaling
         if (ratio > limit) throw new InvalidDataException(summary);
         return summary;
 
-        string Payload(int length) => CoreScaling.Expand(test.GetProperty("payload"), length).GetRawText();
+        string Payload(int length) => express
+            ? CoreScaling.ExpandText(test.GetProperty("payload"), length)
+            : CoreScaling.Expand(test.GetProperty("payload"), length).GetRawText();
 
         double Measure(string payload, bool stream)
         {
@@ -50,7 +53,7 @@ internal static class AgentScaling
                         throw new InvalidDataException(error.ToString());
                 if (parser.Read("", out _, true) is { } end) throw new InvalidDataException(end.ToString());
             }
-            else if (DirectJson.Compile(payload, registry, out _) is { } error)
+            else if ((express ? Express.Compile(payload, registry, out _) : DirectJson.Compile(payload, registry, out _)) is { } error)
                 throw new InvalidDataException(error.ToString());
             return Stopwatch.GetElapsedTime(start).TotalMilliseconds;
         }
