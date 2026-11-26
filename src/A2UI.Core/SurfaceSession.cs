@@ -32,7 +32,7 @@ public sealed record SurfaceSnapshot(
 
     /// <summary>Resolves a binding in a collection occurrence's data scope.</summary>
     /// <param name="scope">The absolute pointer to the occurrence's data.</param>
-    /// <param name="path">An absolute or relative pointer. An empty string selects the scope.</param>
+    /// <param name="path">An absolute or relative pointer. An empty string or a dot selects the scope.</param>
     /// <param name="value">The resolved JSON value, including explicit null.</param>
     /// <returns>Whether the binding resolves.</returns>
     public bool TryGetScopedData(string scope, string path, out JsonElement value)
@@ -46,12 +46,13 @@ public sealed record SurfaceSnapshot(
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(path);
 
+        var context = scope.Length > 1 ? scope.TrimEnd('/') : scope;
         absolutePath = path switch
         {
-            "" => scope,
+            "" or "." => context,
             _ when path.StartsWith('/') => path,
-            _ when scope == "/" => "/" + path,
-            _ => scope + "/" + path
+            _ when context == "/" => "/" + path,
+            _ => context + "/" + path
         };
         return DataPointer.TryParse(scope, out _) && DataPointer.TryParse(absolutePath, out _);
     }
@@ -140,9 +141,13 @@ public sealed class SurfaceSession : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxOccurrences);
         return TryGetSurface(surfaceId, out var snapshot)
-            ? ComponentOccurrences.Resolve(snapshot!, _catalogs, maxOccurrences, cancellationToken)
+            ? ProjectOccurrences(snapshot!, maxOccurrences, cancellationToken)
             : null;
     }
+
+    internal ComponentOccurrence? ProjectOccurrences(SurfaceSnapshot snapshot, int limit,
+        CancellationToken cancellationToken, Func<string, JsonElement, IReadOnlyList<string>>? identifyItems = null) =>
+        ComponentOccurrences.Resolve(snapshot, _catalogs, limit, cancellationToken, identifyItems);
 
     /// <summary>Collects the data models of the live surfaces that asked for synchronization with <c>sendDataModel</c>.</summary>
     /// <returns>The <c>surfaces</c> metadata to attach to each message that goes to the agent, or null when no surface opted in.</returns>
@@ -212,7 +217,7 @@ public sealed class SurfaceSession : IDisposable
     /// <summary>Writes data through a binding in a collection occurrence's scope.</summary>
     /// <param name="surfaceId">The identifier of the live surface.</param>
     /// <param name="scope">The absolute pointer to the occurrence's data.</param>
-    /// <param name="path">An absolute or relative pointer. An empty string selects the scope.</param>
+    /// <param name="path">An absolute or relative pointer. An empty string or a dot selects the scope.</param>
     /// <param name="value">The replacement JSON value. Null deletes the target.</param>
     /// <param name="cancellationToken">Cancels processing before commit.</param>
     /// <returns>The rejection diagnostic, or null on success.</returns>
