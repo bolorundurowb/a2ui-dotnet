@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -102,6 +104,13 @@ public sealed class ResolvedNode
     public ValidationResult? BlockingResult =>
         ValidationResults.FirstOrDefault(result => result.Severity == "error");
 
+    /// <summary>The component's <c>@metadata</c> envelope, if supplied.</summary>
+    public JsonElement? Metadata { get; internal set; }
+
+    /// <summary>The resolved <c>@accessibility</c> attributes, if supplied.</summary>
+    /// <remarks>The hidden attribute is true when this node or an ancestor is hidden.</remarks>
+    public JsonElement? Accessibility { get; internal set; }
+
     internal IReadOnlyDictionary<string, JsonElement> Actions { get; set; } = new Dictionary<string, JsonElement>();
 
     internal string Signature { get; set; } = "";
@@ -110,7 +119,9 @@ public sealed class ResolvedNode
 /// <summary>Projects the mounted tree of one surface into resolved nodes and reports creation and property changes.</summary>
 /// <remarks>
 /// The resolver subscribes to the session and refreshes after each committed change to its surface. Callers serialize
-/// access with the session. Create the resolver before or after the surface exists; it attaches when the surface appears.
+/// access with the session. The resolver attaches when the surface appears and disposes when it is deleted.
+/// Template items retain identity across moves by matching their JSON values, in list order for duplicates.
+/// An unmatched item reuses the unmatched occurrence at its original index, allowing in-place value edits.
 /// </remarks>
 public sealed class NodeResolver : IDisposable
 {
@@ -122,6 +133,8 @@ public sealed class NodeResolver : IDisposable
     private readonly ActionDispatcher _actions;
     private readonly string _surfaceId;
     private Dictionary<string, ResolvedNode> _nodesByInstance = new(StringComparer.Ordinal);
+    private Dictionary<string, TemplateItems> _templateItems = new(StringComparer.Ordinal);
+    private long _nextItemId;
     private bool _disposed;
 
     /// <summary>Creates a resolver for one surface and starts tracking it.</summary>
@@ -138,8 +151,8 @@ public sealed class NodeResolver : IDisposable
         _functions = functions ?? new FunctionEvaluator(catalogs);
         _actions = new ActionDispatcher(_functions, timeProvider);
         _surfaceId = surfaceId ?? throw new ArgumentNullException(nameof(surfaceId));
-        _session.Changed += OnChanged;
         Refresh();
+        _session.Changed += OnChanged;
     }
 
     /// <summary>The mounted nodes in depth-first order. Empty when the surface or its root is absent.</summary>
@@ -151,6 +164,12 @@ public sealed class NodeResolver : IDisposable
     /// <summary>Raised once for each retained node whose resolved properties change after a committed update.</summary>
     public event Action<ResolvedNode>? PropsChanged;
 
+    /// <summary>Raised after the metadata of a retained node changes, including when it is cleared.</summary>
+    public event Action<ResolvedNode>? MetadataChanged;
+
+    /// <summary>Raised after the resolved accessibility attributes of a retained node change.</summary>
+    public event Action<ResolvedNode>? AccessibilityChanged;
+
     /// <summary>Writes a value through a writable binding on a node.</summary>
     /// <param name="node">A node from <see cref="Nodes"/>.</param>
     /// <param name="property">The name of a property whose resolved kind is a writable binding.</param>
@@ -161,7 +180,7 @@ public sealed class NodeResolver : IDisposable
         ArgumentNullException.ThrowIfNull(node);
         ArgumentNullException.ThrowIfNull(property);
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!node.Props.TryGetValue(property, out var resolved) || resolved.Kind != ResolvedPropertyKind.Binding ||
+        if (!IsMounted(node) || !node.Props.TryGetValue(property, out var resolved) || resolved.Kind != ResolvedPropertyKind.Binding ||
             !resolved.Writable || resolved.BindingPath is null)
             return new("notWritable", "/" + property, "The property is not a writable binding.");
 
@@ -182,7 +201,7 @@ public sealed class NodeResolver : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!_session.TryGetSurface(_surfaceId, out var snapshot) || snapshot is null)
             return new(null, RendererError.FromDiagnostic(new("unknownSurface", "", $"Surface '{_surfaceId}' does not exist."), _surfaceId));
-        if (!node.Actions.TryGetValue(property, out var action))
+        if (!IsMounted(node) || !node.Actions.TryGetValue(property, out var action))
             return new(null, RendererError.FromDiagnostic(new("invalidAction", "", $"The property '{property}' is not an action."), _surfaceId));
         return _actions.Dispatch(snapshot, node.ComponentId, node.DataPath, action, userInitiated, metadata);
     }
@@ -195,49 +214,90 @@ public sealed class NodeResolver : IDisposable
         _disposed = true;
         _session.Changed -= OnChanged;
         _nodesByInstance.Clear();
+        _templateItems.Clear();
         Nodes = [];
+        NodeCreated = null;
+        PropsChanged = null;
+        MetadataChanged = null;
+        AccessibilityChanged = null;
     }
+
+    private bool IsMounted(ResolvedNode node) =>
+        _nodesByInstance.TryGetValue(node.InstanceId, out var mounted) && ReferenceEquals(node, mounted);
 
     private void OnChanged(SurfaceChange change)
     {
-        if (change.SurfaceId == _surfaceId)
-            Refresh();
+        if (_disposed || change.SurfaceId != _surfaceId)
+            return;
+        if (change.Snapshot is null)
+        {
+            Dispose();
+            return;
+        }
+
+        Refresh();
     }
 
     private void Refresh()
     {
-        var occurrences = _session.GetComponentOccurrences(_surfaceId);
-        var snapshot = occurrences is null || !_session.TryGetSurface(_surfaceId, out var current) ? null : current;
+        _session.TryGetSurface(_surfaceId, out var snapshot);
+        var templates = new Dictionary<string, TemplateItems>(StringComparer.Ordinal);
+        var occurrences = snapshot is null ? null
+            : _session.ProjectOccurrences(snapshot, 10_000, default, IdentifyItems);
         var previous = _nodesByInstance;
         var next = new Dictionary<string, ResolvedNode>(StringComparer.Ordinal);
         var ordered = new List<ResolvedNode>();
         var created = new List<ResolvedNode>();
         var changed = new List<ResolvedNode>();
+        var metadataChanged = new List<ResolvedNode>();
+        var accessibilityChanged = new List<ResolvedNode>();
 
         if (occurrences is not null && snapshot is not null)
-            Visit(occurrences);
+            Visit(occurrences, ancestorHidden: false);
 
+        _templateItems = templates;
         _nodesByInstance = next;
         Nodes = ordered.AsReadOnly();
         foreach (var node in created)
             NodeCreated?.Invoke(node);
         foreach (var node in changed)
             PropsChanged?.Invoke(node);
+        foreach (var node in metadataChanged)
+            MetadataChanged?.Invoke(node);
+        foreach (var node in accessibilityChanged)
+            AccessibilityChanged?.Invoke(node);
 
-        void Visit(ComponentOccurrence occurrence)
+        IReadOnlyList<string> IdentifyItems(string template, JsonElement list)
+        {
+            _templateItems.TryGetValue(template, out var previousItems);
+            var items = TemplateItems.Reconcile(list, previousItems, ref _nextItemId);
+            templates.Add(template, items);
+            return items.Ids;
+        }
+
+        void Visit(ComponentOccurrence occurrence, bool ancestorHidden)
         {
             var properties = ResolveProperties(occurrence, snapshot!);
             var checks = ResolveChecks(occurrence, snapshot!);
-            var signature = Signature(properties, checks);
+            var signature = Signature(properties, checks, occurrence.Children);
+            JsonElement? metadata = occurrence.Definition.TryGetProperty("@metadata", out var envelope) ? envelope : null;
+            var accessibility = ResolveAccessibility(occurrence, snapshot!, ancestorHidden);
+            var hidden = accessibility is { } attributes && attributes.TryGetProperty("hidden", out var hiddenValue) &&
+                hiddenValue.ValueKind == JsonValueKind.True;
             var isNew = !previous.TryGetValue(occurrence.InstanceId, out var node);
             if (isNew)
             {
                 node = new ResolvedNode(occurrence.InstanceId);
                 created.Add(node);
             }
-            else if (node!.Signature != signature)
+            else
             {
-                changed.Add(node);
+                if (node!.Signature != signature)
+                    changed.Add(node);
+                if (node.Metadata?.GetRawText() != metadata?.GetRawText())
+                    metadataChanged.Add(node);
+                if (node.Accessibility?.GetRawText() != accessibility?.GetRawText())
+                    accessibilityChanged.Add(node);
             }
 
             node!.Position = occurrence.Position;
@@ -247,11 +307,55 @@ public sealed class NodeResolver : IDisposable
             node.Props = properties;
             node.Actions = ReadActions(occurrence.Definition, properties);
             node.Checks = checks;
+            node.Metadata = metadata;
+            node.Accessibility = accessibility;
             node.Signature = signature;
             next[occurrence.InstanceId] = node;
             ordered.Add(node);
             foreach (var child in occurrence.Children)
-                Visit(child);
+                Visit(child, hidden);
+        }
+    }
+
+    private sealed record TemplateItems(string[] Values, string[] Ids)
+    {
+        internal static TemplateItems Reconcile(JsonElement list, TemplateItems? previous, ref long nextId)
+        {
+            // A data write may re-serialise the model. Ignore differences in JSON whitespace.
+            var buffer = new ArrayBufferWriter<byte>();
+            using (var writer = new Utf8JsonWriter(buffer))
+                list.WriteTo(writer);
+            using var normalized = JsonDocument.Parse(buffer.WrittenMemory);
+            var values = normalized.RootElement.EnumerateArray().Select(item => item.GetRawText()).ToArray();
+            var ids = new string[values.Length];
+            if (previous is null)
+            {
+                for (var index = 0; index < ids.Length; index++)
+                    ids[index] = (++nextId).ToString(CultureInfo.InvariantCulture);
+                return new(values, ids);
+            }
+
+            var indexByValue = new Dictionary<string, Queue<int>>(StringComparer.Ordinal);
+            for (var index = 0; index < previous.Values.Length; index++)
+            {
+                if (!indexByValue.TryGetValue(previous.Values[index], out var indexes))
+                    indexByValue.Add(previous.Values[index], indexes = new());
+                indexes.Enqueue(index);
+            }
+
+            var retained = new bool[previous.Ids.Length];
+            for (var index = 0; index < values.Length; index++)
+            {
+                if (!indexByValue.TryGetValue(values[index], out var indexes) || !indexes.TryDequeue(out var match))
+                    continue;
+                ids[index] = previous.Ids[match];
+                retained[match] = true;
+            }
+            for (var index = 0; index < ids.Length; index++)
+                ids[index] ??= index < retained.Length && !retained[index]
+                    ? previous.Ids[index]
+                    : (++nextId).ToString(CultureInfo.InvariantCulture);
+            return new(values, ids);
         }
     }
 
@@ -261,7 +365,7 @@ public sealed class NodeResolver : IDisposable
         var booleanProperties = BooleanProperties(occurrence.Definition, surface.CatalogId);
         foreach (var property in occurrence.Definition.EnumerateObject())
         {
-            if (property.Name is "component" or "id" or "metadata" || property.Name.StartsWith('@'))
+            if (property.Name is "component" or "id" || property.Name.StartsWith('@'))
                 continue;
             properties[property.Name] = ResolveProperty(occurrence, property.Name, property.Value, surface,
                 booleanProperties.Contains(property.Name));
@@ -297,7 +401,39 @@ public sealed class NodeResolver : IDisposable
         if (IsAction(value))
             return new(ResolvedPropertyKind.Action, null, false, null, []);
 
-        return new(ResolvedPropertyKind.Value, value, false, null, []);
+        JsonElement? resolved = _functions.TryResolveValue(surface, occurrence.DataPath, value, userInitiated: false,
+            out var literal, out _) ? literal : null;
+        return new(ResolvedPropertyKind.Value, resolved, false, null, []);
+    }
+
+    private JsonElement? ResolveAccessibility(ComponentOccurrence occurrence, SurfaceSnapshot surface, bool ancestorHidden)
+    {
+        if (!occurrence.Definition.TryGetProperty("@accessibility", out var attributes) && !ancestorHidden)
+            return null;
+
+        var buffer = new ArrayBufferWriter<byte>();
+        using var writer = new Utf8JsonWriter(buffer);
+        writer.WriteStartObject();
+        if (attributes.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var attribute in attributes.EnumerateObject())
+            {
+                if (attribute.Name == "hidden" && ancestorHidden)
+                    continue;
+                if (_functions.TryResolveValue(surface, occurrence.DataPath, attribute.Value, userInitiated: false,
+                    out var value, out _))
+                {
+                    writer.WritePropertyName(attribute.Name);
+                    (attribute.Name == "hidden" ? BooleanElement(FunctionValues.ToBoolean(value)) : value).WriteTo(writer);
+                }
+            }
+        }
+        if (ancestorHidden)
+            writer.WriteBoolean("hidden", true);
+        writer.WriteEndObject();
+        writer.Flush();
+        using var document = JsonDocument.Parse(buffer.WrittenMemory);
+        return document.RootElement.Clone();
     }
 
     private static Dictionary<string, JsonElement> ReadActions(JsonElement definition, Dictionary<string, ResolvedProperty> properties)
@@ -414,7 +550,8 @@ public sealed class NodeResolver : IDisposable
 
     private static JsonElement BooleanElement(bool value) => value ? TrueValue : FalseValue;
 
-    private static string Signature(IReadOnlyDictionary<string, ResolvedProperty> properties, IReadOnlyList<CheckResult> checks)
+    private static string Signature(IReadOnlyDictionary<string, ResolvedProperty> properties,
+        IReadOnlyList<CheckResult> checks, IReadOnlyList<ComponentOccurrence> children)
     {
         var builder = new StringBuilder();
         foreach (var check in checks)
@@ -427,6 +564,8 @@ public sealed class NodeResolver : IDisposable
                 .Append(property.Value is { } value ? value.GetRawText() : "\u0000").Append('|')
                 .Append(string.Join(",", property.ChildPositions)).Append(';');
         }
+        foreach (var child in children)
+            builder.Append(child.InstanceId.Length).Append(':').Append(child.InstanceId);
         return builder.ToString();
     }
 }

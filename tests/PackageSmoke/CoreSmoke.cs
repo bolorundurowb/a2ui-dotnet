@@ -90,6 +90,7 @@ internal static class CoreSmoke
         CheckDataWrites(session);
         CheckExpressionScope();
         CheckNodeResolver(registry);
+        CheckNestedTemplateIdentity(registry);
         CheckFunctions(registry);
         CheckOutbound(registry);
         CheckRpc(registry);
@@ -321,6 +322,67 @@ internal static class CoreSmoke
 
         Require(session.Apply(Decode("""{"version":"1.0","deleteSurface":{"surfaceId":"nodes"}}""")) is null);
         Require(resolver.Nodes.Count == 0);
+    }
+
+    private static void CheckNestedTemplateIdentity(CatalogRegistry registry)
+    {
+        using var session = new SurfaceSession(registry);
+        using var resolver = new NodeResolver(session, registry, "nested");
+        var create = Decode($$$"""
+            {"version":"1.0","createSurface":{"surfaceId":"nested","catalogId":"{{{CatalogRegistry.BasicCatalogId}}}",
+              "dataModel":{"groups":[{"items":[{"name":"Ada"},{"name":"Lin"}]}]},
+              "components":[{"id":"root","component":"Column","children":{"componentId":"group","path":"/groups"}},
+                {"id":"group","component":"Column","children":{"componentId":"item","path":"items"}},
+                {"id":"item","component":"Row","children":["name","index"]},
+                {"id":"name","component":"Text","text":{"@path":"name"}},
+                {"id":"index","component":"Text","text":{"@call":"@index"}}]}}
+            """);
+        Require(session.Apply(create) is null);
+
+        ResolvedNode Item(string position, string component) =>
+            resolver.Nodes.Single(node => node.Position == position && node.ComponentId == component);
+        const string list = "root/children/0/children/";
+        var group = Item("root/children/0", "group");
+        var ada = Item(list + "0/children/0", "name");
+        var lin = Item(list + "1/children/0", "name");
+        var groupChanges = 0;
+        var calls = 0;
+        resolver.PropsChanged += node =>
+        {
+            calls++;
+            if (node == group)
+                groupChanges++;
+            Require(resolver.Nodes.Contains(ada) &&
+                session.TryGetSurface("nested", out var snapshot) &&
+                snapshot!.TryGetScopedData(ada.DataPath, "name", out var value) &&
+                value.ValueEquals(ada.Props["text"].Value!.Value.GetString()));
+            Require(session.WriteData("nested", "/illegal", Json("true"))?.Code == "reentrantUpdate");
+        };
+
+        const string items = "/groups/0/items";
+        Require(session.WriteData("nested", items, Json("""[{"name":"Lee"},{"name":"Lin"},{"name":"Ada"}]""")) is null);
+        Require(ReferenceEquals(lin, Item(list + "1/children/0", "name")));
+        Require(ReferenceEquals(ada, Item(list + "2/children/0", "name")));
+        Require(Item(list + "2/children/1", "index").Props["text"].Value?.GetInt32() == 2);
+        Require(resolver.Write(ada, "text", Json("\"Grace\"")) is null);
+        Require(ReferenceEquals(ada, Item(list + "2/children/0", "name")));
+        Require(session.WriteData("nested", items, Json("""[{"name":"Lin"},{"name":"Grace"},{"name":"Lee"}]""")) is null);
+        Require(ReferenceEquals(lin, Item(list + "0/children/0", "name")));
+        Require(ReferenceEquals(ada, Item(list + "1/children/0", "name")));
+        Require(session.WriteData("nested", items, Json("""[{"name":"Grace"},{"name":"Lee"}]""")) is null);
+        Require(ReferenceEquals(ada, Item(list + "0/children/0", "name")));
+        Require(resolver.Write(lin, "text", Json("\"stale\""))?.Code == "notWritable");
+        Require(groupChanges == 3);
+
+        Require(session.Apply(Decode("""{"version":"1.0","deleteSurface":{"surfaceId":"nested"}}""")) is null);
+        var before = calls;
+        Require(session.Apply(create) is null && resolver.Nodes.Count == 0 && calls == before);
+
+        static JsonElement Json(string value)
+        {
+            using var document = JsonDocument.Parse(value);
+            return document.RootElement.Clone();
+        }
     }
 
     private static void CheckFunctions(CatalogRegistry registry)

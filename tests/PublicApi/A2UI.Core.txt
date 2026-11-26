@@ -25,6 +25,8 @@ C A2UI.Core.ValidationResult [Public, HideBySig, SpecialName, RTSpecialName] (Sy
 E A2UI.Core.FunctionBinding.Changed : System.Action?
 E A2UI.Core.FunctionCallRouter.ActionDispatched : System.Action`1[T][A2UI.Core.WireMessage]?
 E A2UI.Core.FunctionCallRouter.ErrorReported : System.Action`1[T][A2UI.Core.RendererError]?
+E A2UI.Core.NodeResolver.AccessibilityChanged : System.Action`1[T][A2UI.Core.ResolvedNode]?
+E A2UI.Core.NodeResolver.MetadataChanged : System.Action`1[T][A2UI.Core.ResolvedNode]?
 E A2UI.Core.NodeResolver.NodeCreated : System.Action`1[T][A2UI.Core.ResolvedNode]?
 E A2UI.Core.NodeResolver.PropsChanged : System.Action`1[T][A2UI.Core.ResolvedNode]?
 E A2UI.Core.SurfaceSession.Changed : System.Action`1[T][A2UI.Core.SurfaceChange]?
@@ -204,9 +206,13 @@ M A2UI.Core.HostFunctionCall.set_UserInitiated [Public, HideBySig, SpecialName] 
 M A2UI.Core.NodeResolver.Dispose [Public, Final, Virtual, HideBySig, VtableLayoutMask] -> System.Void ()
 M A2UI.Core.NodeResolver.Invoke [Public, HideBySig] -> A2UI.Core.ActionResult (A2UI.Core.ResolvedNode node [None], System.String property [None], System.Boolean userInitiated [Optional, HasDefault] = True, System.Nullable`1[System.Text.Json.JsonElement] metadata [Optional, HasDefault] = )
 M A2UI.Core.NodeResolver.Write [Public, HideBySig] -> A2UI.Core.A2uiDiagnostic? (A2UI.Core.ResolvedNode node [None], System.String property [None], System.Text.Json.JsonElement value [None])
+M A2UI.Core.NodeResolver.add_AccessibilityChanged [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.ResolvedNode]? value [None])
+M A2UI.Core.NodeResolver.add_MetadataChanged [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.ResolvedNode]? value [None])
 M A2UI.Core.NodeResolver.add_NodeCreated [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.ResolvedNode]? value [None])
 M A2UI.Core.NodeResolver.add_PropsChanged [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.ResolvedNode]? value [None])
 M A2UI.Core.NodeResolver.get_Nodes [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.ResolvedNode] ()
+M A2UI.Core.NodeResolver.remove_AccessibilityChanged [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.ResolvedNode]? value [None])
+M A2UI.Core.NodeResolver.remove_MetadataChanged [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.ResolvedNode]? value [None])
 M A2UI.Core.NodeResolver.remove_NodeCreated [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.ResolvedNode]? value [None])
 M A2UI.Core.NodeResolver.remove_PropsChanged [Public, HideBySig, SpecialName] -> System.Void (System.Action`1[T][A2UI.Core.ResolvedNode]? value [None])
 M A2UI.Core.ProtocolSchemas.get_AgentToRenderer [Public, Static, HideBySig, SpecialName] -> System.Text.Json.JsonElement ()
@@ -236,6 +242,7 @@ M A2UI.Core.RendererError.set_Message [Public, HideBySig, SpecialName] -> System
 M A2UI.Core.RendererError.set_Path [Public, HideBySig, SpecialName] -> System.Void (System.String? value [None])
 M A2UI.Core.RendererError.set_SurfaceId [Public, HideBySig, SpecialName] -> System.Void (System.String? value [None])
 M A2UI.Core.RendererFunctionHandler.Handle [Public, HideBySig] -> A2UI.Core.WireMessage (A2UI.Core.WireMessage call [None], System.Boolean userActivation [Optional, HasDefault] = False)
+M A2UI.Core.ResolvedNode.get_Accessibility [Public, HideBySig, SpecialName] -> System.Nullable`1[System.Text.Json.JsonElement] ()
 M A2UI.Core.ResolvedNode.get_BlockingResult [Public, HideBySig, SpecialName] -> A2UI.Core.ValidationResult? ()
 M A2UI.Core.ResolvedNode.get_Checks [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.CheckResult] ()
 M A2UI.Core.ResolvedNode.get_ComponentId [Public, HideBySig, SpecialName] -> System.String ()
@@ -243,6 +250,7 @@ M A2UI.Core.ResolvedNode.get_ComponentType [Public, HideBySig, SpecialName] -> S
 M A2UI.Core.ResolvedNode.get_DataPath [Public, HideBySig, SpecialName] -> System.String ()
 M A2UI.Core.ResolvedNode.get_InstanceId [Public, HideBySig, SpecialName] -> System.String ()
 M A2UI.Core.ResolvedNode.get_IsValid [Public, HideBySig, SpecialName] -> System.Boolean ()
+M A2UI.Core.ResolvedNode.get_Metadata [Public, HideBySig, SpecialName] -> System.Nullable`1[System.Text.Json.JsonElement] ()
 M A2UI.Core.ResolvedNode.get_Position [Public, HideBySig, SpecialName] -> System.String ()
 M A2UI.Core.ResolvedNode.get_Props [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, A2UI.Core.ResolvedProperty] ()
 M A2UI.Core.ResolvedNode.get_ValidationErrors [Public, HideBySig, SpecialName] -> System.Collections.Generic.IReadOnlyList`1[T][System.String] ()
@@ -387,6 +395,7 @@ P A2UI.Core.RendererError.FunctionCallId : System.String? () init
 P A2UI.Core.RendererError.Message : System.String () init
 P A2UI.Core.RendererError.Path : System.String? () init
 P A2UI.Core.RendererError.SurfaceId : System.String? () init
+P A2UI.Core.ResolvedNode.Accessibility : System.Nullable`1[System.Text.Json.JsonElement] ()
 P A2UI.Core.ResolvedNode.BlockingResult : A2UI.Core.ValidationResult? ()
 P A2UI.Core.ResolvedNode.Checks : System.Collections.Generic.IReadOnlyList`1[T][A2UI.Core.CheckResult] ()
 P A2UI.Core.ResolvedNode.ComponentId : System.String ()
@@ -394,6 +403,7 @@ P A2UI.Core.ResolvedNode.ComponentType : System.String ()
 P A2UI.Core.ResolvedNode.DataPath : System.String ()
 P A2UI.Core.ResolvedNode.InstanceId : System.String ()
 P A2UI.Core.ResolvedNode.IsValid : System.Boolean ()
+P A2UI.Core.ResolvedNode.Metadata : System.Nullable`1[System.Text.Json.JsonElement] ()
 P A2UI.Core.ResolvedNode.Position : System.String ()
 P A2UI.Core.ResolvedNode.Props : System.Collections.Generic.IReadOnlyDictionary`2[TKey,TValue][System.String, A2UI.Core.ResolvedProperty] ()
 P A2UI.Core.ResolvedNode.ValidationErrors : System.Collections.Generic.IReadOnlyList`1[T][System.String] ()

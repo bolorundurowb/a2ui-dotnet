@@ -17,7 +17,8 @@ public sealed record ComponentOccurrence(string InstanceId, string ComponentId, 
 internal static class ComponentOccurrences
 {
     internal static ComponentOccurrence? Resolve(SurfaceSnapshot surface, CatalogRegistry catalogs,
-        int limit, CancellationToken cancellationToken)
+        int limit, CancellationToken cancellationToken,
+        Func<string, JsonElement, IReadOnlyList<string>>? identifyItems = null)
     {
         return Mount(surface.RootComponentId, "/root", "/", 0, "root");
 
@@ -51,10 +52,14 @@ internal static class ComponentOccurrences
                 var templateId = WireJson.Path(WireJson.Path(WireJson.Path(instanceId, "template"), edge.Path), edge.Id);
                 // The template edge path ends in "componentId"; the item index replaces that segment.
                 var listPosition = position + edge.Path[..^"/componentId".Length];
+                if (list.GetArrayLength() > limit)
+                    throw new InvalidOperationException("The component occurrence limit was exceeded.");
+                var itemIds = identifyItems?.Invoke(templateId, list);
                 for (var i = 0; i < list.GetArrayLength(); i++)
                 {
                     var index = i.ToString(CultureInfo.InvariantCulture);
-                    Add(WireJson.Path(templateId, index), WireJson.Path(path == "/" ? "" : path, index),
+                    Add(WireJson.Path(templateId, itemIds is null ? index : itemIds[i]),
+                        WireJson.Path(path == "/" ? "" : path, index),
                         listPosition + "/" + index);
                 }
 
