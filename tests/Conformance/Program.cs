@@ -56,6 +56,12 @@ foreach (var suite in new[] { "core", "agent" })
                 _ when !scaling && RpcCases.Handles(path) => null,
                 (_, _, "conformance/core/functions.yaml" or "conformance/core/index_function.yaml")
                     when FunctionCases.ExclusionReason(path, test) is { } why => why,
+                (_, _, "conformance/core/data_context.yaml") => null,
+                (_, _, "conformance/core/accessibility.yaml") when id == "test_accessibility_v1_0_legacy_bare_accessibility_dual_read" =>
+                    "The pinned 1.0 component schema requires @accessibility. Core does not accept the transitional bare spelling.",
+                (_, _, "conformance/core/accessibility.yaml") when id == "test_accessibility_implicit_label_inference" =>
+                    "Inferring accessible names from a platform's rendered controls belongs to renderer adapters.",
+                (_, _, "conformance/core/accessibility.yaml") => null,
                 (_, _, "conformance/core/node_resolution.yaml") when NodeCases.Supports(id) => null,
                 (_, _, "conformance/core/node_resolution.yaml") => NodeCases.ExclusionReason(test, assets),
                 (_, _, RendererFunctionCases.Path) when id == "test_call_renderer_function_checked_rejects_a_function_that_needs_user_activation" =>
@@ -87,7 +93,7 @@ foreach (var suite in new[] { "core", "agent" })
                     "The fixture sends component metadata as bare metadata. The pinned protocol uses @metadata.",
                 (_, _, "conformance/core/reserved_keys.yaml") when id is
                     "test_escaped_doubled_at_unescaping" or "test_escaped_doubled_at_metadata_unescaping" =>
-                    "The fixture expects @@ keys to be unescaped when the value is evaluated. Core keeps wire values unchanged and resolved nodes do not unescape yet (#12).",
+                    null,
                 (_, _, "conformance/core/error_responses.yaml") =>
                     "The case expects a renderer error message with a protocol error code. Mapping diagnostics to those messages belongs to structured errors (#14).",
                 _ => "Public API or fixture adapter is pending."
@@ -112,6 +118,13 @@ foreach (var suite in new[] { "core", "agent" })
                         OutboundCases.Run(path, test, assets);
                     else if (RpcCases.Handles(path))
                         RpcCases.Run(path, test);
+                    else if (path == "conformance/core/data_context.yaml")
+                        NodeCases.RunScope(test);
+                    else if (path == "conformance/core/accessibility.yaml")
+                        NodeCases.RunAccessibility(test);
+                    else if (path == "conformance/core/reserved_keys.yaml" && id is
+                        "test_escaped_doubled_at_unescaping" or "test_escaped_doubled_at_metadata_unescaping")
+                        NodeCases.RunEscaping(test, assets);
                     else if (path == "conformance/core/node_resolution.yaml")
                         NodeCases.Run(test, assets);
                     else if (FunctionCases.Supports(path, test))

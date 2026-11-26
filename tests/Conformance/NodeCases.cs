@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using A2UI.Core;
 using YamlDotNet.Serialization;
 
@@ -11,17 +12,20 @@ internal static class NodeCases
         "event_property_is_not_an_action",
         "inline_create_applies_data_before_components",
         "separate_data_message_keeps_arrival_order",
-        "direct_data_binding_and_function_call_schemas"
+        "direct_data_binding_and_function_call_schemas",
+        "metadata_only_update_emits_metadata_not_props",
+        "metadata_cleared_when_update_omits_it",
+        "metadata_and_props_update_together"
     };
 
     private static readonly HashSet<string> ExpectationFields = new(StringComparer.Ordinal)
     {
-        "nodes", "data", "emissions", "created_emissions", "same_nodes"
+        "nodes", "data", "emissions", "created_emissions", "same_nodes", "metadata_emissions"
     };
 
     private static readonly HashSet<string> NodeFields = new(StringComparer.Ordinal)
     {
-        "component_id", "type", "state", "data_path", "props"
+        "component_id", "type", "state", "data_path", "props", "metadata"
     };
 
     internal static bool Supports(string id) => SupportedIds.Contains(id);
@@ -42,6 +46,7 @@ internal static class NodeCases
         var registry = new CatalogRegistry();
         var catalogId = RegisterCatalog(registry, fixture.GetProperty("catalog").GetString()!, assets);
         using var session = new SurfaceSession(registry);
+        var metadataCase = test.GetProperty("name").GetString()!.StartsWith("metadata_", StringComparison.Ordinal);
         if (!(fixture.TryGetProperty("surface", out var surfaceFlag) && surfaceFlag.ValueKind == JsonValueKind.False))
         {
             Apply(session, new
@@ -52,13 +57,13 @@ internal static class NodeCases
                     surfaceId = SurfaceId,
                     catalogId,
                     dataModel = fixture.GetProperty("data"),
-                    components = fixture.GetProperty("components")
+                    components = ReadComponents(fixture, metadataCase)
                 }
             });
         }
 
         using var resolver = new NodeResolver(session, registry, SurfaceId);
-        var scenario = new NodeScenario(session, resolver);
+        var scenario = new NodeScenario(session, resolver, metadataCase);
         scenario.Observe();
         scenario.BeginStep();
         scenario.Check(test.GetProperty("expect"), Array.Empty<ResolvedNode>(), requireEmissions: false);
@@ -73,6 +78,95 @@ internal static class NodeCases
                 scenario.Check(step.GetProperty("expect"), before, requireEmissions: true);
             }
         }
+    }
+
+    internal static void RunScope(JsonElement test)
+    {
+        var args = test.GetProperty("args");
+        var scope = args.TryGetProperty("contextPath", out var context) ? context.GetString()! : "/";
+        var path = args.GetProperty("path").GetString()!;
+        var expected = test.GetProperty("expect").GetString()!;
+        using var session = new SurfaceSession(new CatalogRegistry());
+        Apply(session, new { version = "1.0", createSurface = new { surfaceId = SurfaceId } });
+        var value = JsonSerializer.SerializeToElement(new { sentinel = true });
+        Require(session.WriteScopedData(SurfaceId, "/", expected, value) is null);
+        Require(session.TryGetSurface(SurfaceId, out var populated) &&
+            populated!.TryGetScopedData(scope, path, out var actual) && JsonEquals(actual, value),
+            $"Path '{path}' in scope '{scope}' did not resolve to '{expected}'.");
+    }
+
+    internal static void RunAccessibility(JsonElement test)
+    {
+        var surfaceId = test.GetProperty("messages")[0].GetProperty("createSurface").GetProperty("surfaceId").GetString()!;
+        var registry = new CatalogRegistry();
+        using var session = new SurfaceSession(registry);
+        using var resolver = new NodeResolver(session, registry, surfaceId);
+
+        if (test.TryGetProperty("steps", out var steps))
+        {
+            foreach (var step in steps.EnumerateArray())
+                Check(step);
+        }
+        else
+            Check(test);
+
+        void Check(JsonElement step)
+        {
+            foreach (var message in step.GetProperty("messages").EnumerateArray())
+                Apply(session, message);
+
+            foreach (var entry in step.GetProperty("assertions").GetProperty("accessibilityTree").EnumerateObject())
+            {
+                var node = resolver.Nodes.Single(candidate => candidate.ComponentId == entry.Name);
+                foreach (var attribute in entry.Value.EnumerateObject())
+                {
+                    // Platform roles and interactive states are derived by renderer adapters.
+                    if (attribute.Name is "role" or "checked")
+                        continue;
+                    Require(node.Accessibility is { } accessibility &&
+                        accessibility.TryGetProperty(attribute.Name, out var value) && JsonEquals(value, attribute.Value),
+                        $"Accessibility attribute {entry.Name}.{attribute.Name} differs.");
+                }
+            }
+        }
+    }
+
+    internal static void RunEscaping(JsonElement test, string assets)
+    {
+        var registry = CoreCases.BuildRegistry(test, assets);
+        using var session = new SurfaceSession(registry);
+        foreach (var message in test.GetProperty("messages").EnumerateArray())
+            Apply(session, message);
+        foreach (var surface in test.GetProperty("expect").GetProperty("surfaces").EnumerateObject())
+        {
+            using var resolver = new NodeResolver(session, registry, surface.Name);
+            foreach (var component in surface.Value.GetProperty("components").EnumerateArray())
+            {
+                var id = component.GetProperty("id").GetString();
+                var node = resolver.Nodes.Single(candidate => candidate.ComponentId == id);
+                Require(component.GetProperty("component").ValueEquals(node.ComponentType));
+                foreach (var property in component.EnumerateObject().Where(property => property.Name is not ("id" or "component")))
+                    Require(node.Props.TryGetValue(property.Name, out var resolved) &&
+                        resolved.Value is { } value && JsonEquals(value, property.Value),
+                        $"Resolved property {id}.{property.Name} differs.");
+            }
+        }
+    }
+
+    private static JsonElement ReadComponents(JsonElement owner, bool metadataCase)
+    {
+        var components = owner.GetProperty("components");
+        if (!metadataCase)
+            return components;
+        // The pinned cases use the pre-rename spelling. Adapt only the component envelope.
+        var normalized = JsonNode.Parse(components.GetRawText())!.AsArray();
+        foreach (var component in normalized)
+        {
+            var definition = component!.AsObject();
+            if (definition.Remove("metadata", out var metadata))
+                definition["@metadata"] = metadata;
+        }
+        return JsonSerializer.SerializeToElement(normalized);
     }
 
     private static string RegisterCatalog(CatalogRegistry registry, string relativePath, string assets)
@@ -149,7 +243,8 @@ internal static class NodeCases
         if (expected.ValueKind == JsonValueKind.Object && expected.TryGetProperty("action", out var action))
             return actual.Kind == ResolvedPropertyKind.Action && action.ValueKind == JsonValueKind.True;
         if (expected.ValueKind == JsonValueKind.Object && expected.TryGetProperty("writable", out var writable))
-            return actual.Kind == ResolvedPropertyKind.Binding && actual.Writable == writable.GetBoolean() &&
+            return actual.Kind is ResolvedPropertyKind.Binding or ResolvedPropertyKind.Value &&
+                actual.Writable == writable.GetBoolean() &&
                 actual.Value is { } value && JsonEquals(value, expected.GetProperty("value"));
         if (expected.ValueKind == JsonValueKind.Array && actual.Kind == ResolvedPropertyKind.Children &&
             expected.EnumerateArray().All(item => item.ValueKind == JsonValueKind.Object && item.TryGetProperty("node", out _)))
@@ -164,14 +259,17 @@ internal static class NodeCases
             throw new InvalidOperationException(message);
     }
 
-    private sealed class NodeScenario(SurfaceSession session, NodeResolver resolver)
+    private sealed class NodeScenario(SurfaceSession session, NodeResolver resolver, bool metadataCase)
     {
         private readonly HashSet<ResolvedNode> _createdInStep = new(ReferenceEqualityComparer.Instance);
         private readonly Dictionary<ResolvedNode, int> _emissions = new(ReferenceEqualityComparer.Instance);
         private readonly Dictionary<ResolvedNode, int> _createdEmissions = new(ReferenceEqualityComparer.Instance);
 
+        private readonly Dictionary<ResolvedNode, int> _metadataEmissions = new(ReferenceEqualityComparer.Instance);
+
         public void Observe()
         {
+            resolver.MetadataChanged += node => _metadataEmissions[node] = _metadataEmissions.GetValueOrDefault(node) + 1;
             resolver.NodeCreated += node => _createdInStep.Add(node);
             resolver.PropsChanged += node =>
             {
@@ -184,6 +282,7 @@ internal static class NodeCases
         {
             _createdInStep.Clear();
             _emissions.Clear();
+            _metadataEmissions.Clear();
             _createdEmissions.Clear();
         }
 
@@ -200,7 +299,7 @@ internal static class NodeCases
                     Apply(session, new
                     {
                         version = "1.0",
-                        updateComponents = new { surfaceId = SurfaceId, components = step.GetProperty("components") }
+                        updateComponents = new { surfaceId = SurfaceId, components = ReadComponents(step, metadataCase) }
                     });
                     break;
                 case "set_data":
@@ -231,7 +330,9 @@ internal static class NodeCases
             if (requireEmissions)
                 Require(expect.TryGetProperty("emissions", out _), "A step must declare emissions.");
             if (expect.TryGetProperty("emissions", out var emissions))
-                CheckEmissions(emissions, before);
+                CheckEmissions(emissions, before, _emissions);
+            if (expect.TryGetProperty("metadata_emissions", out var metadataEmissions))
+                CheckEmissions(metadataEmissions, before, _metadataEmissions);
             if (expect.TryGetProperty("created_emissions", out var created))
                 CheckCreatedEmissions(created);
             if (expect.TryGetProperty("same_nodes", out var same))
@@ -265,6 +366,11 @@ internal static class NodeCases
                         case "data_path":
                             Require(node.DataPath == field.Value.GetString(), $"{entry.Name} data_path differs.");
                             break;
+                        case "metadata":
+                            Require(node.Metadata is { } metadata
+                                ? JsonEquals(metadata, field.Value)
+                                : field.Value.ValueKind == JsonValueKind.Null, $"{entry.Name} metadata differs.");
+                            break;
                         case "props":
                             foreach (var property in field.Value.EnumerateObject())
                                 Require(node.Props.TryGetValue(property.Name, out var resolved) &&
@@ -283,15 +389,16 @@ internal static class NodeCases
                     $"The data at {entry.Name} differs.");
         }
 
-        private void CheckEmissions(JsonElement expected, IReadOnlyList<ResolvedNode> before)
+        private void CheckEmissions(JsonElement expected, IReadOnlyList<ResolvedNode> before,
+            Dictionary<ResolvedNode, int> emissions)
         {
             var beforeSet = new HashSet<ResolvedNode>(before, ReferenceEqualityComparer.Instance);
             var retained = resolver.Nodes.Where(node => beforeSet.Contains(node)).ToArray();
             foreach (var node in retained)
             {
                 var expectedCount = expected.TryGetProperty(node.Position, out var count) ? count.GetInt32() : 0;
-                Require(_emissions.GetValueOrDefault(node) == expectedCount,
-                    $"{node.Position} emitted {_emissions.GetValueOrDefault(node)} times, expected {expectedCount}.");
+                Require(emissions.GetValueOrDefault(node) == expectedCount,
+                    $"{node.Position} emitted {emissions.GetValueOrDefault(node)} times, expected {expectedCount}.");
             }
             foreach (var entry in expected.EnumerateObject())
                 Require(retained.Any(node => node.Position == entry.Name), $"No retained node at {entry.Name}.");
