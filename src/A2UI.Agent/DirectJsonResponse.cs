@@ -26,6 +26,7 @@ public static partial class DirectJson
         cancellationToken.ThrowIfCancellationRequested();
         var decoded = new List<DirectJsonResponsePart>();
         var messages = new List<WireMessage>();
+        var scopedSurfaces = new Dictionary<string, bool>(StringComparer.Ordinal);
         parts = decoded.AsReadOnly();
         turn = null;
         foreach (var part in wrapped ? Unwrap(response) : [new DirectJsonPart(response, true)])
@@ -38,7 +39,7 @@ public static partial class DirectJson
             }
             if (!part.IsFinal)
                 return new("ParseError", "", "Missing closing Direct JSON tag.");
-            if (Decode(part.Content, out var block) is { } error)
+            if (Decode(part.Content, out var block, state.Catalogs, scopedSurfaces, state) is { } error)
                 return error;
             messages.AddRange(block);
             decoded.Add(new(null, block));

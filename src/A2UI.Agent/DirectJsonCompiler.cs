@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using A2UI.Core;
 
 namespace A2UI.Agent;
@@ -9,16 +10,16 @@ public static partial class DirectJson
 {
     /// <summary>Reads one Direct JSON block and validates its envelopes and catalog items.</summary>
     /// <param name="raw">The unwrapped model output.</param>
-    /// <param name="catalogs">The active catalogs.</param>
+    /// <param name="catalogs">The active catalogs. Unqualified items on mixed surfaces must have a unique declaring catalog.</param>
     /// <param name="messages">The validated messages in input order on success.</param>
     /// <returns>A parse or validation diagnostic on failure.</returns>
     public static A2uiDiagnostic? Compile(string raw, CatalogRegistry catalogs, out IReadOnlyList<WireMessage> messages)
     {
-        var parseError = Decode(raw, out var decoded);
+        ArgumentNullException.ThrowIfNull(catalogs);
+        var parseError = Decode(raw, out var decoded, catalogs);
         messages = Array.Empty<WireMessage>();
         if (parseError is not null)
             return parseError;
-        ArgumentNullException.ThrowIfNull(catalogs);
         var created = decoded.Where(m => m.Kind == "createSurface")
             .Select(m => m.Payload.GetProperty("surfaceId").GetString()!).ToHashSet(StringComparer.Ordinal);
         var surfaces = new Dictionary<string, string?>(StringComparer.Ordinal);
@@ -50,14 +51,16 @@ public static partial class DirectJson
                     if (catalogs.ValidateComponent(component, catalog) is { } componentError)
                         return componentError with { Code = "ValidationError" };
             if (message.Kind == "callRendererFunction" &&
-                CheckCall(payload.GetProperty("callFunction"), catalog, catalogs, true) is { } callError)
+                CheckCall(payload.GetProperty("callFunction"), catalog, catalogs, true, id is not null) is { } callError)
                 return callError;
         }
         messages = decoded;
         return null;
     }
 
-    internal static A2uiDiagnostic? Decode(string raw, out IReadOnlyList<WireMessage> messages)
+    internal static A2uiDiagnostic? Decode(string raw, out IReadOnlyList<WireMessage> messages,
+        CatalogRegistry? catalogs = null, Dictionary<string, bool>? scopedSurfaces = null,
+        RendererState? state = null)
     {
         ArgumentNullException.ThrowIfNull(raw);
         messages = Array.Empty<WireMessage>();
@@ -71,7 +74,17 @@ public static partial class DirectJson
             {
                 var buffer = new ArrayBufferWriter<byte>();
                 using (var writer = new Utf8JsonWriter(buffer))
-                    entry.WriteTo(writer);
+                {
+                    if (catalogs?.CatalogIds.Count > 1 && entry.ValueKind == JsonValueKind.Object)
+                    {
+                        var envelope = JsonNode.Parse(entry.GetRawText())!.AsObject();
+                        if (QualifyCatalogItems(envelope, catalogs, scopedSurfaces ??= new(StringComparer.Ordinal), state) is { } qualificationError)
+                            return qualificationError;
+                        envelope.WriteTo(writer);
+                    }
+                    else
+                        entry.WriteTo(writer);
+                }
                 if (!WireMessage.TryDecode(buffer.WrittenMemory, WireDirection.AgentToRenderer, out var message, out var error))
                     return error! with { Code = "ValidationError" };
                 decoded.Add(message!);
@@ -103,7 +116,7 @@ public static partial class DirectJson
 
     private static A2uiDiagnostic Invalid(string key, string reason) => new("ValidationError", "/" + key, reason);
 
-    internal static A2uiDiagnostic? CheckCall(JsonElement call, string? defaultId, CatalogRegistry catalogs, bool outer)
+    internal static A2uiDiagnostic? CheckCall(JsonElement call, string? defaultId, CatalogRegistry catalogs, bool outer, bool hasSurface)
     {
         var id = call.TryGetProperty("catalogId", out var explicitId) && explicitId.ValueKind == JsonValueKind.String
             ? explicitId.GetString() : defaultId;
@@ -112,16 +125,22 @@ public static partial class DirectJson
         if (call.TryGetProperty("args", out var arguments) && arguments.ValueKind != JsonValueKind.Object)
             return Invalid("args", "Expected an args object.");
         if (id is null || !catalogs.TryGetDefinition(id, out var definition))
-            return Invalid("catalogId", id ?? "Missing catalogId.");
+            return Invalid("catalogId", id ?? "Missing catalogId and no default catalog is available.");
         if (!definition.TryGetProperty("functions", out var functions) ||
             !functions.TryGetProperty(name.GetString()!, out var schema))
             return Invalid("@call", name.GetString()!);
         var caller = schema.TryGetProperty("allowedCallers", out var permitted) ? permitted.GetString() : "rendererOnly";
         if (outer ? caller == "rendererOnly" : caller == "agentOnly")
             return Invalid("allowedCallers", $"Function {name.GetString()} has caller restriction {caller}.");
-        if (catalogs.ValidateFunction(call, defaultId) is { } error)
-            return error with { Code = "ValidationError" };
-        return call.TryGetProperty("args", out var args) ? Walk(args) : null;
+        if (schema.TryGetProperty("requiresUserActivation", out var activation) && activation.ValueKind == JsonValueKind.True)
+            return Invalid("requiresUserActivation", $"Function {name.GetString()} requires user activation.");
+
+        var nestedDefault = hasSurface ? defaultId : id;
+        if (call.TryGetProperty("args", out var args) && Walk(args) is { } issue)
+            return issue;
+        return catalogs.ValidateFunction(call, nestedDefault) is { } error
+            ? error with { Code = "ValidationError" }
+            : null;
 
         A2uiDiagnostic? Walk(JsonElement value)
         {
@@ -133,7 +152,7 @@ public static partial class DirectJson
             if (value.ValueKind != JsonValueKind.Object)
                 return null;
             if (value.TryGetProperty("@call", out var nested) && nested.ValueKind == JsonValueKind.String)
-                return CheckCall(value, defaultId, catalogs, false);
+                return CheckCall(value, nestedDefault, catalogs, false, true);
             if (value.TryGetProperty("@path", out var path))
             {
                 foreach (var property in value.EnumerateObject())

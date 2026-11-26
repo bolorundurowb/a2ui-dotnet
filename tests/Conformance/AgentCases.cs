@@ -5,6 +5,8 @@ using A2UI.Core;
 internal static class AgentCases
 {
     internal static bool Supports(string path, JsonElement test) =>
+        path == "conformance/agent/multi_catalog_formats.yaml" &&
+            test.GetProperty("args").GetProperty("format").ValueEquals("direct_json") ||
         path == "conformance/agent/direct_json/response_streaming.yaml" &&
             !test.GetProperty("args").GetRawText().Contains("catalog_v0_", StringComparison.Ordinal) ||
         path == "conformance/agent/request_processor.yaml" &&
@@ -15,7 +17,7 @@ internal static class AgentCases
         path == "conformance/agent/skill.yaml" && test.GetProperty("action").ValueEquals("export_to_directory") ||
         path == "conformance/agent/skill.yaml" && test.GetProperty("name").GetString()!.StartsWith("test_direct_json_", StringComparison.Ordinal) ||
         path == "conformance/agent/direct_json/compiler.yaml" ||
-        path == "conformance/agent/direct_json/decompiler.yaml" && !test.GetProperty("name").ValueEquals("test_decompile_json_catalog_qualified_components") ||
+        path == "conformance/agent/direct_json/decompiler.yaml" ||
         path == "conformance/agent/direct_json/response_parser.yaml" ||
         path == "conformance/agent/renderer_state.yaml" && (test.GetProperty("turns")[0].TryGetProperty("payload", out _) ||
             test.GetProperty("turns")[0].GetProperty("format").ValueEquals("direct_json")) ||
@@ -233,6 +235,17 @@ internal static class AgentCases
     {
         var args = test.GetProperty("args");
         var host = new CatalogRegistry(false);
+        if (test.GetProperty("name").ValueEquals("test_direct_json_create_format_rejects_duplicate_catalog_ids"))
+        {
+            // A Direct JSON request takes a registry whose public entry point rejects duplicates.
+            var entries = args.GetProperty("catalogs");
+            Register(host, entries[0], assets);
+            Require(RequestProcessor.Fixed(host, out _) is null, "The first catalog must bind successfully.");
+            var path = Path.Combine(assets, "conformance", entries[1].GetProperty("catalog").GetString()!);
+            Require(!host.TryRegister(File.ReadAllBytes(path), out var duplicate) &&
+                duplicate?.Code == "duplicateCatalog", "Duplicate catalog ID was accepted.");
+            return;
+        }
         foreach (var entry in args.GetProperty("catalogs").EnumerateArray())
             Register(host, entry, assets);
         var initial = host.CatalogIds.ToArray();
@@ -347,11 +360,13 @@ internal static class AgentCases
         var args = test.GetProperty("args");
         var registry = new CatalogRegistry(false);
         var files = args.TryGetProperty("catalog", out var catalog)
-            ? new[] { catalog.GetString()! } : args.GetProperty("catalogs").EnumerateArray().Select(e => e.GetString()!);
-        foreach (var file in files)
+            ? new[] { catalog } : args.GetProperty("catalogs").EnumerateArray().ToArray();
+        foreach (var entry in files)
         {
-            var bytes = File.ReadAllBytes(Path.Combine(assets, "conformance", file));
-            if (file == "test_data/catalogs/agent_functions_catalog_v1_0.json")
+            var bytes = entry.ValueKind == JsonValueKind.String
+                ? File.ReadAllBytes(Path.Combine(assets, "conformance", entry.GetString()!))
+                : System.Text.Encoding.UTF8.GetBytes(entry.GetRawText());
+            if (entry.ValueKind == JsonValueKind.String && entry.ValueEquals("test_data/catalogs/agent_functions_catalog_v1_0.json"))
             {
                 // The empty component set omits the required union in this pinned fixture.
                 var doc = System.Text.Json.Nodes.JsonNode.Parse(bytes)!;
@@ -379,7 +394,7 @@ internal static class AgentCases
                         Require(text.ValueEquals(parts[i].Text), "Text differs.");
                     else
                         Require(System.Text.Json.Nodes.JsonNode.DeepEquals(
-                            System.Text.Json.Nodes.JsonNode.Parse(expectedParts[i].GetProperty("a2ui").GetRawText()),
+                            ExpectedWireMessages(expectedParts[i].GetProperty("a2ui"), registry.CatalogIds.Count > 1),
                             System.Text.Json.Nodes.JsonNode.Parse(DirectJson.Decompile(parts[i].Messages!))), "Messages differ.");
                 }
             }
@@ -406,7 +421,24 @@ internal static class AgentCases
             DirectJson.Decompile(roundTrip) == output, "Round trip changed messages.");
         var expected = test.GetProperty(decompile ? "messages" : "expect");
         Require(System.Text.Json.Nodes.JsonNode.DeepEquals(System.Text.Json.Nodes.JsonNode.Parse(output),
-            System.Text.Json.Nodes.JsonNode.Parse(expected.GetRawText())), "Compiled messages differ.");
+            ExpectedWireMessages(expected, registry.CatalogIds.Count > 1)), "Compiled messages differ.");
+    }
+
+    private static System.Text.Json.Nodes.JsonNode ExpectedWireMessages(JsonElement expected, bool mixedCatalogs)
+    {
+        var messages = System.Text.Json.Nodes.JsonNode.Parse(expected.GetRawText())!.AsArray();
+        if (mixedCatalogs)
+            foreach (var message in messages)
+            {
+                var payload = message!["createSurface"] ?? message["updateComponents"];
+                if (payload?["components"] is not System.Text.Json.Nodes.JsonArray components)
+                    continue;
+                // The pinned inference fixtures use both spellings. The 1.0 wire field is @catalogId.
+                foreach (var component in components.Select(item => item!.AsObject()))
+                    if (!component.ContainsKey("@catalogId") && component.Remove("catalogId", out var catalog))
+                        component["@catalogId"] = catalog;
+            }
+        return messages;
     }
 
     private static void CheckFraming(JsonElement test)
