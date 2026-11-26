@@ -323,12 +323,39 @@ internal static class AgentSmoke
 
     }
 
+    private static void CheckRendererFunctionCall()
+    {
+        var catalogs = new CatalogRegistry(includeBasicCatalog: false);
+        const string catalog = """
+            {"catalogId":"test:device","protocolVersion":"1.0","functions":{
+              "getLocale":{"type":"object","returnType":"string","allowedCallers":"rendererOrAgent",
+                "properties":{"@call":{"const":"getLocale"},"args":{"type":"object"}},"required":["@call"]}}}
+            """;
+        if (!catalogs.TryRegister(System.Text.Encoding.UTF8.GetBytes(catalog), out var error))
+            throw new InvalidOperationException(error!.ToString());
+        if (RequestProcessor.Fixed(catalogs, out var request) is { } requestError)
+            throw new InvalidOperationException(requestError.ToString());
+
+        using var client = request!.CreateRendererFunctionClient();
+        var incoming = request.CreateMessageProcessor(
+            onRendererFunctionResponse: (message, _) => ValueTask.FromResult(client.TryHandleResponse(message)));
+        var call = client.Call("test:device", "getLocale", functionCallId: "locale");
+        const string response = """{"version":"1.0","rendererFunctionResponse":{"functionCallId":"locale","value":"en-GB"}}""";
+        var payload = System.Text.Encoding.UTF8.GetBytes(response);
+        if (call.Message.Kind != "callRendererFunction" ||
+            !incoming.ProcessAsync(payload).GetAwaiter().GetResult().Handled ||
+            !call.Result.IsCompletedSuccessfully || !call.Result.Result.ValueEquals("en-GB") ||
+            incoming.ProcessAsync(payload).GetAwaiter().GetResult().Handled)
+            throw new InvalidOperationException("The renderer function response was not correlated exactly once.");
+    }
+
     internal static void Run()
     {
         CheckSkillExport();
         CheckDelivery();
         CheckMixedCatalogDirectJson();
         CheckInboundTurn();
+        CheckRendererFunctionCall();
         CheckStreaming();
         CheckStreamingBackpressure().GetAwaiter().GetResult();
         using var mirror = new RendererState(new CatalogRegistry());
