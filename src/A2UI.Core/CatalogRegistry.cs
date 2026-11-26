@@ -78,8 +78,8 @@ public sealed class CatalogRegistry
         if (components is not null || functions is not null)
         {
             var selected = JsonNode.Parse(definition.GetRawText())!.AsObject();
-            SelectEntries(selected, "components", components, out _, ignoreMissing: true);
-            SelectEntries(selected, "functions", functions, out _, ignoreMissing: true);
+            SelectEntries(selected, "components", components?.Select(CatalogEntry.Keep), out _, ignoreMissing: true);
+            SelectEntries(selected, "functions", functions?.Select(CatalogEntry.Keep), out _, ignoreMissing: true);
             definition = ProtocolSchemas.Parse(selected.ToJsonString());
             diagnostic = CheckDefinition(definition);
             if (diagnostic is not null)
@@ -111,7 +111,26 @@ public sealed class CatalogRegistry
     /// <param name="diagnostic">The reason the derivation failed, if any.</param>
     /// <returns>Whether the derived catalog was registered.</returns>
     public bool TryDerive(string sourceId, string catalogId, IEnumerable<string>? components,
-        IEnumerable<string>? functions, string? instructions, out A2uiDiagnostic? diagnostic)
+        IEnumerable<string>? functions, string? instructions, out A2uiDiagnostic? diagnostic) =>
+        TryDerive(sourceId, catalogId, new CatalogDerivation
+        {
+            Components = components?.Select(CatalogEntry.Keep),
+            Functions = functions?.Select(CatalogEntry.Keep),
+            Instructions = instructions
+        }, out diagnostic);
+
+    /// <summary>Registers a new catalog built from entries of a registered catalog and new entries.</summary>
+    /// <remarks>
+    /// A kept entry comes from the source. A defined entry is added, or replaces the source's entry of the same name.
+    /// An omitted list keeps every entry of that kind. The derived catalog keeps the source's protocol version and other
+    /// fields, except <c>$id</c>, <c>title</c>, <c>description</c> and <c>instructions</c>, which describe the source.
+    /// </remarks>
+    /// <param name="sourceId">The identifier of the registered source.</param>
+    /// <param name="catalogId">The identifier for the new catalog.</param>
+    /// <param name="derivation">The entries and instructions of the new catalog.</param>
+    /// <param name="diagnostic">The reason the derivation failed, if any. A kept name the source lacks is <c>unknownCatalogItem</c>.</param>
+    /// <returns>Whether the derived catalog was registered. The registry is unchanged on failure.</returns>
+    public bool TryDerive(string sourceId, string catalogId, CatalogDerivation derivation, out A2uiDiagnostic? diagnostic)
     {
         if (!TryGetDefinition(sourceId, out var source))
         {
@@ -123,33 +142,45 @@ public sealed class CatalogRegistry
         derived["catalogId"] = catalogId;
         foreach (var key in new[] { "$id", "title", "description", "instructions" })
             derived.Remove(key);
-        if (instructions is not null)
-            derived["instructions"] = instructions;
+        if (derivation.Instructions is not null)
+            derived["instructions"] = derivation.Instructions;
 
-        if (!SelectEntries(derived, "components", components, out diagnostic) ||
-            !SelectEntries(derived, "functions", functions, out diagnostic))
+        if (!SelectEntries(derived, "components", derivation.Components, out diagnostic) ||
+            !SelectEntries(derived, "functions", derivation.Functions, out diagnostic))
             return false;
         return TryRegister(System.Text.Encoding.UTF8.GetBytes(derived.ToJsonString()), out diagnostic);
     }
 
-    private static bool SelectEntries(JsonObject definition, string group, IEnumerable<string>? names,
+    private static bool SelectEntries(JsonObject definition, string group, IEnumerable<CatalogEntry>? entries,
         out A2uiDiagnostic? diagnostic, bool ignoreMissing = false)
     {
         diagnostic = null;
-        if (names is null)
+        if (entries is null)
             return true;
         var selected = new JsonObject();
-        foreach (var name in names)
+        foreach (var entry in entries)
         {
-            if (definition[group]?[name] is not { } item)
+            var path = WireJson.Path(WireJson.Path("", group), entry.Name);
+            if (entry.Schema is { } schema)
+            {
+                if (schema.ValueKind != JsonValueKind.Object)
+                {
+                    diagnostic = new("invalidCatalogItem", path, "Expected an object schema.");
+                    return false;
+                }
+                selected[entry.Name] = JsonNode.Parse(schema.GetRawText());
+                continue;
+            }
+
+            if (definition[group]?[entry.Name] is not { } item)
             {
                 if (ignoreMissing)
                     continue;
-                diagnostic = new("unknownCatalogItem", WireJson.Path(WireJson.Path("", group), name),
-                    "The source catalog does not contain the selected entry.");
+                diagnostic = new("unknownCatalogItem", path,
+                    $"The source catalog does not contain the {(group == "components" ? "component" : "function")} '{entry.Name}'.");
                 return false;
             }
-            selected[name] = item.DeepClone();
+            selected[entry.Name] = item.DeepClone();
         }
         definition[group] = selected;
         if (definition["$defs"] is JsonObject definitions)
@@ -186,6 +217,23 @@ public sealed class CatalogRegistry
         if (!_catalogs.TryGetValue(catalogId, out var catalog))
             return false;
         definition = catalog.Definition;
+        return true;
+    }
+
+    /// <summary>Creates the self-contained JSON Schema that validates the components and functions of a registered catalog.</summary>
+    /// <remarks>
+    /// The schema flattens each component's <c>allOf</c> mixins and adds the <c>id</c> envelope. It keeps the catalog's
+    /// leaf <c>$defs</c> and copies the shared types that the catalog reaches, so every reference is local.
+    /// </remarks>
+    /// <param name="catalogId">The catalog identifier.</param>
+    /// <param name="schema">A new schema that the caller owns, on success.</param>
+    /// <returns>Whether the catalog is registered.</returns>
+    public bool TryCreateValidationSchema(string catalogId, out JsonElement schema)
+    {
+        schema = default;
+        if (!_catalogs.TryGetValue(catalogId, out var catalog))
+            return false;
+        schema = CatalogValidationSchema.Create(catalog.Definition);
         return true;
     }
 

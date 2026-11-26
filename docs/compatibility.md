@@ -79,7 +79,7 @@ The same .NET 8.0.34 scaling run passed the two Direct JSON compile cases. The A
 
 Nested template items retain identity through insertion, reordering and removal by matching their JSON values, in list order for duplicates. For unmatched values, an unmatched occurrence at the same index survives an in-place edit. Moved nodes receive updated positions and scopes in the same notification batch. Hosts should treat occurrence IDs as opaque. Core continues to store the original wire values and unescapes doubled `@@` keys when resolving component properties.
 
-On .NET 8.0.34 for Windows x64, the Release conformance run passed 583 Core and 360 Agent cases, with 282 Core and 670 Agent exclusions and no failures. The pinned revision is `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe`.
+On .NET 8.0.34 for Windows x64, the Release conformance run passed 595 Core and 405 Agent cases, with 270 Core and 625 Agent exclusions and no failures. The pinned revision is `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe`.
 
 | Pinned suite | Passed | Exclusions and adaptations |
 | --- | ---: | --- |
