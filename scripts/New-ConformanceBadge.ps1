@@ -31,7 +31,18 @@ for ($index = 0; $index -lt $total; $index++) {
     }
 }
 
-$color = if ($failed -gt 0) { '#a4262c' } elseif ($passed -eq $total) { '#237438' } else { '#765800' }
+$passRate = 100.0 * $passed / $total
+$color = if ($passRate -lt 50) {
+    '#a4262c'
+} elseif ($passRate -lt 80) {
+    '#8a5a00'
+} elseif ($passRate -lt 90) {
+    '#596b16'
+} elseif ($passRate -lt 100) {
+    '#2b6b4a'
+} else {
+    '#237438'
+}
 $message = "$passed / $total passing"
 $labelWidth = 140
 $messageWidth = 12 + 7 * $message.Length
