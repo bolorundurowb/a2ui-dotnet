@@ -52,13 +52,14 @@ public sealed class RendererState : IDisposable
                 if (message.Direction == WireDirection.AgentToRenderer && message.Kind == "callRendererFunction")
                 {
                     string? defaultId = null;
-                    if (message.Payload.TryGetProperty("surfaceId", out var surface))
+                    var hasSurface = message.Payload.TryGetProperty("surfaceId", out var surface);
+                    if (hasSurface)
                     {
                         if (!candidate.TryGetSurface(surface.GetString()!, out var snapshot))
                             return new("ValidationError", "/surfaceId", "Surface does not exist.");
                         defaultId = snapshot!.CatalogId;
                     }
-                    if (DirectJson.CheckCall(message.Payload.GetProperty("callFunction"), defaultId, Catalogs, true) is { } rpcError)
+                    if (DirectJson.CheckCall(message.Payload.GetProperty("callFunction"), defaultId, Catalogs, true, hasSurface) is { } rpcError)
                         return rpcError;
                 }
                 else if (message.Direction != WireDirection.AgentToRenderer || message.Kind != "agentFunctionResponse")
