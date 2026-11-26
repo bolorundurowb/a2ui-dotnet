@@ -105,8 +105,41 @@ The two schema parity fixtures compare the embedded pinned documents with the
 specification files. Core serves those documents instead of generating them
 from SDK models.
 
-Derived catalogs can select entries
-from a registered source. The upstream `derive_source_catalog_v1_0.json`
-fixture includes legacy function shapes and a theme field, which the pinned
-1.0 catalog schema rejects. Derivation with replacement entries and golden
-generated schema comparisons remain pending.
+Derived catalogs keep named entries, add entries and replace entries by
+name. `CatalogRegistry.TryDerive` takes a `CatalogDerivation` whose lists
+contain `CatalogEntry.Keep` and `CatalogEntry.Define` items. An omitted list keeps
+every entry of that kind. The derived catalog drops `$id`, `title`,
+`description` and `instructions`, and an unknown name is an
+`unknownCatalogItem` diagnostic that names the entry. The `$defs` unions follow
+the entries. The seven 1.0 `test_v10_catalog_derive_*` cases pass. The upstream
+`derive_source_catalog_v1_0.json` fixture has two disagreements with the
+pinned 1.0 catalog schema, so the harness adapts it in memory. It writes the 1.0
+function shape (`@call`, `returnType` and `required`) for the source functions and
+for the new `reverse` function, and it drops the top-level `theme`. The pinned
+schema allows neither, so no case checks that a derived catalog keeps a theme.
+The legacy v0.9 derive case is excluded with the other legacy cases.
+
+`CatalogRegistry.TryCreateValidationSchema` generates the bundled schema for a
+registered catalog. It flattens each component's `allOf` mixins, with the
+component's own property winning over a mixin, drops `@catalogId` and adds the
+`id` envelope. It rewrites references to the shared types as local `#/$defs/`
+references and copies the shared types the catalog reaches. A reference to a
+shared type takes that type's description when it has none, and a reference to a
+catalog leaf `$defs` entry does not. The schema omits `$id`, `title` and
+`description`. The pinned `test_v10_basic_validation_schema` and
+`test_v10_custom_validation_schema_leaf_defs` goldens match. The Python source of
+the generator is not part of the pinned assets, so the rules above come from
+those two goldens and are not verified against other catalogs. The
+`test_v10_custom_validation_schema_leaf_defs` fixture omits the required
+`$defs.anyFunction`, so the harness supplies `{"not": {}}`. The generator
+produces the same value for a missing `anyFunction` when the catalog declares no
+functions.
+
+The round-trip cases for the MCP catalog and for custom function metadata pass on
+the pinned files. `test_v10_custom_catalog_round_trip_leaf_defs` declares
+`metadata.displayName` and the extension key `x-vendor`, and the pinned schema
+rejects both. The harness removes `displayName` and spells the key `x_vendor`. The
+case then checks that the leaf `$defs`, the chained and unused leaf definitions
+and the call-site overrides survive loading and a second load of the stored
+definition. The pinned v0.8 and v0.9 cases for these actions are excluded as
+legacy.

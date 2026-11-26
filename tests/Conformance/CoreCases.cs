@@ -35,6 +35,8 @@ internal static class CoreCases
                 _ => null
             };
 
+        if (file == "conformance/core/catalog.yaml" && id == "test_v09_catalog_derive_keeps_protocol_version")
+            return "Legacy protocol is outside the profile.";
         if (file != "conformance/core/catalog.yaml" || !test.GetProperty("action").ValueEquals("from_json"))
             return null;
 
@@ -151,7 +153,10 @@ internal static class CoreCases
             "test_v10_extensions_keys_are_unicode_identifiers" or "test_v10_component_metadata_only_holds_extensions" or
             "test_v10_component_common_rejects_null_catalog_id" or "test_v10_function_call_rejects_unknown_keys") => true,
         ("conformance/core/catalog.yaml", "test_v10_basic_catalog_to_json" or "test_v10_basic_catalog_round_trip" or
-            "test_v10_component_metadata_catalog_round_trip") => true,
+            "test_v10_component_metadata_catalog_round_trip" or "test_v10_mcp_catalog_round_trip" or
+            "test_v10_custom_catalog_round_trip_function_metadata" or "test_v10_custom_catalog_round_trip_leaf_defs" or
+            "test_v10_basic_validation_schema" or "test_v10_custom_validation_schema_leaf_defs") => true,
+        ("conformance/core/catalog.yaml", _) when test.GetProperty("action").ValueEquals("derive") => true,
         _ => false
     };
 
@@ -463,8 +468,20 @@ internal static class CoreCases
             }
             return;
         }
+        switch (test.GetProperty("action").GetString())
+        {
+            case "derive":
+                RunDerive(test, assets);
+                return;
+            case "validation_schema":
+                RunValidationSchema(test, assets);
+                return;
+        }
+
         var roundTrip = test.GetProperty("action").GetString() == "round_trip";
-        var bytes = File.ReadAllBytes(Path.Combine(assets, test.GetProperty(roundTrip ? "catalogPath" : "expectFile").GetString()!));
+        var bytes = roundTrip
+            ? Encoding.UTF8.GetBytes(LoadCatalogFixture(test, assets).ToJsonString())
+            : File.ReadAllBytes(Path.Combine(assets, test.GetProperty("expectFile").GetString()!));
         var registry = new CatalogRegistry(includeBasicCatalog: !roundTrip);
         if (roundTrip)
             Require(registry.TryRegister(bytes, out var error), error?.ToString() ?? "Registration failed.");
@@ -472,6 +489,181 @@ internal static class CoreCases
         var catalogId = published.RootElement.GetProperty("catalogId").GetString()!;
         Require(registry.TryGetDefinition(catalogId, out var catalog), "Missing catalog.");
         Require(Equal(catalog, published.RootElement), "Published catalog differs.");
+        if (!roundTrip)
+            return;
+
+        // Serializing the loaded definition and loading it again must not change it.
+        var second = new CatalogRegistry(includeBasicCatalog: false);
+        Require(second.TryRegister(Encoding.UTF8.GetBytes(catalog.GetRawText()), out var secondError),
+            secondError?.ToString() ?? "Second registration failed.");
+        Require(second.TryGetDefinition(catalogId, out var again) && Equal(again, published.RootElement),
+            "The definition changed after a second round trip.");
+    }
+
+    // The upstream fixtures below disagree with the pinned 1.0 catalog schema. The adapter repairs each difference in
+    // memory, leaves the pinned files untouched and keeps the behaviour the case names. docs/schema-validation.md
+    // records every repair.
+    private static JsonObject LoadCatalogFixture(JsonElement test, string assets)
+    {
+        if (test.TryGetProperty("catalogPath", out var path))
+            return JsonNode.Parse(File.ReadAllBytes(Path.Combine(assets, path.GetString()!)))!.AsObject();
+
+        var catalog = JsonNode.Parse(test.GetProperty("catalog").GetRawText())!.AsObject();
+        catalog["protocolVersion"] ??= WireMessage.Version;
+        // The pinned schema allows only `extensions` in catalog metadata, and extension keys must be identifiers.
+        if (catalog["metadata"] is JsonObject metadata)
+        {
+            metadata.Remove("displayName");
+            if (metadata["extensions"] is JsonObject extensions)
+                metadata["extensions"] = new JsonObject(extensions.Select(member =>
+                    KeyValuePair.Create(member.Key.Replace('-', '_'), member.Value?.DeepClone())));
+        }
+        // The pinned schema requires anyFunction beside anyComponent.
+        if (catalog["$defs"] is JsonObject definitions)
+            definitions["anyFunction"] ??= new JsonObject { ["not"] = new JsonObject() };
+        return catalog;
+    }
+
+    private static void RunValidationSchema(JsonElement test, string assets)
+    {
+        var registry = new CatalogRegistry(includeBasicCatalog: false);
+        var catalog = LoadCatalogFixture(test, assets);
+        Require(registry.TryRegister(Encoding.UTF8.GetBytes(catalog.ToJsonString()), out var error),
+            error?.ToString() ?? "Registration failed.");
+        Require(registry.TryCreateValidationSchema(catalog["catalogId"]!.GetValue<string>(), out var schema),
+            "The catalog has no validation schema.");
+        var golden = JsonNode.Parse(File.ReadAllBytes(Path.Combine(assets, test.GetProperty("expectFile").GetString()!)))!;
+        var actual = JsonNode.Parse(schema.GetRawText())!;
+        Require(JsonNode.DeepEquals(Normalize(golden), Normalize(actual)), "The validation schema differs from the golden schema.");
+    }
+
+    // Upstream comparisons ignore the order of enum values and required names.
+    private static JsonNode? Normalize(JsonNode? node)
+    {
+        switch (node)
+        {
+            case JsonObject members:
+                foreach (var member in members.ToArray())
+                {
+                    var value = Normalize(member.Value);
+                    if (member.Key is "enum" or "required" && value is JsonArray list)
+                        members[member.Key] = new JsonArray(list.OrderBy(item => item?.ToJsonString(), StringComparer.Ordinal)
+                            .Select(item => item?.DeepClone()).ToArray());
+                }
+                return members;
+            case JsonArray items:
+                foreach (var item in items)
+                    Normalize(item);
+                return items;
+            default:
+                return node;
+        }
+    }
+
+    // The upstream derive source declares functions through the legacy call/returnType shape and a theme, and the
+    // pinned 1.0 catalog schema accepts neither. The adapter writes the 1.0 function shape and drops the theme, so
+    // the case cannot check that derive keeps the theme.
+    private static void RunDerive(JsonElement test, string assets)
+    {
+        var source = LoadCatalogFixture(test, assets);
+        source.Remove("theme");
+        foreach (var function in source["functions"]!.AsObject())
+            AdaptFunction(function.Value!.AsObject());
+
+        var registry = new CatalogRegistry(includeBasicCatalog: false);
+        Require(registry.TryRegister(Encoding.UTF8.GetBytes(source.ToJsonString()), out var error),
+            error?.ToString() ?? "Source registration failed.");
+        var sourceId = source["catalogId"]!.GetValue<string>();
+
+        var args = test.GetProperty("args");
+        var derivedId = args.GetProperty("catalogId").GetString()!;
+        var derivation = new CatalogDerivation
+        {
+            Components = ReadEntries(args, "components", adapt: false),
+            Functions = ReadEntries(args, "functions", adapt: true),
+            Instructions = args.TryGetProperty("instructions", out var instructions) ? instructions.GetString() : null
+        };
+        var derived = registry.TryDerive(sourceId, derivedId, derivation, out var diagnostic);
+
+        if (test.TryGetProperty("expectError", out var expectedError))
+        {
+            Require(!derived && diagnostic?.Code == "unknownCatalogItem" &&
+                expectedError.GetProperty("category").ValueEquals("CatalogError") &&
+                diagnostic.Message.Contains(expectedError.GetProperty("message").GetString()!, StringComparison.Ordinal),
+                diagnostic?.ToString() ?? "Expected derivation to fail.");
+            Require(!registry.CatalogIds.Contains(derivedId), "A failed derivation registered a catalog.");
+            return;
+        }
+
+        Require(derived, diagnostic?.ToString() ?? "Derivation failed.");
+        Require(registry.TryGetDefinition(derivedId, out var definition), "Missing derived catalog.");
+        Require(registry.TryGetDefinition(sourceId, out var unchanged) && Equal(unchanged,
+            ParseElement(source.ToJsonString())), "Derivation changed the source catalog.");
+
+        foreach (var property in test.GetProperty("expect").EnumerateObject())
+        {
+            switch (property.Name)
+            {
+                case "catalogId" or "protocolVersion" or "instructions":
+                    Require(definition.GetProperty(property.Name).ValueEquals(property.Value.GetString()!),
+                        $"Derived {property.Name} differs.");
+                    break;
+                case "components" or "functions" when property.Value.ValueKind == JsonValueKind.Array:
+                    Require(definition.GetProperty(property.Name).EnumerateObject().Select(item => item.Name).Order(StringComparer.Ordinal)
+                        .SequenceEqual(property.Value.EnumerateArray().Select(name => name.GetString()!).Order(StringComparer.Ordinal)),
+                        $"Derived {property.Name} differ.");
+                    break;
+                case "components":
+                    var entries = definition.GetProperty("components");
+                    Require(entries.EnumerateObject().Select(item => item.Name).Order(StringComparer.Ordinal)
+                        .SequenceEqual(property.Value.EnumerateObject().Select(item => item.Name).Order(StringComparer.Ordinal)),
+                        "Derived components differ.");
+                    foreach (var entry in property.Value.EnumerateObject())
+                        Require(Equal(entries.GetProperty(entry.Name), entry.Value), $"Derived component {entry.Name} differs.");
+                    break;
+                case "absentKeys":
+                    foreach (var key in property.Value.EnumerateArray())
+                        Require(!definition.TryGetProperty(key.GetString()!, out _), $"Derived catalog keeps {key.GetString()}.");
+                    break;
+                case "theme":
+                    break;
+                default:
+                    throw new InvalidDataException($"Unknown derive expectation {property.Name}.");
+            }
+        }
+    }
+
+    // A string keeps the source's entry. A one-member object defines an entry.
+    private static List<CatalogEntry>? ReadEntries(JsonElement args, string group, bool adapt)
+    {
+        if (!args.TryGetProperty(group, out var items))
+            return null;
+        var entries = new List<CatalogEntry>();
+        foreach (var item in items.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String)
+            {
+                entries.Add(CatalogEntry.Keep(item.GetString()!));
+                continue;
+            }
+
+            var definition = item.EnumerateObject().Single();
+            var schema = JsonNode.Parse(definition.Value.GetRawText())!.AsObject();
+            if (adapt)
+                AdaptFunction(schema);
+            entries.Add(CatalogEntry.Define(definition.Name, ParseElement(schema.ToJsonString())));
+        }
+        return entries;
+    }
+
+    private static void AdaptFunction(JsonObject function)
+    {
+        var properties = function["properties"]!.AsObject();
+        properties["@call"] = properties["call"]!.DeepClone();
+        properties.Remove("call");
+        function["returnType"] = properties["returnType"]!["const"]!.DeepClone();
+        properties.Remove("returnType");
+        function["required"] = new JsonArray("@call");
     }
 
     private static byte[] CatalogFixtureBytes(JsonElement test)
@@ -712,6 +904,12 @@ internal static class CoreCases
                 }
             }
         }
+    }
+
+    private static JsonElement ParseElement(string text)
+    {
+        using var document = JsonDocument.Parse(text);
+        return document.RootElement.Clone();
     }
 
     private static bool Equal(JsonElement left, JsonElement right) =>
