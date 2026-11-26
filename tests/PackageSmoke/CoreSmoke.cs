@@ -12,6 +12,8 @@ internal static class CoreSmoke
         CheckOccurrences(registry);
         CheckSessionDisposal(registry);
         CheckCatalogValidation();
+        CheckCatalogDerivation();
+        CheckValidationSchema();
         CheckCandidateGraph();
         var custom = """
             {
@@ -168,6 +170,137 @@ internal static class CoreSmoke
         Require(rejection?.Code == "unknownCatalog", rejection);
     }
 
+    private static void CheckCatalogDerivation()
+    {
+        var registry = new CatalogRegistry();
+        using var label = JsonDocument.Parse("""
+            {"type":"object","properties":{"component":{"const":"Label"},"text":{"type":"string"}},"required":["component"]}
+            """);
+        using var text = JsonDocument.Parse("""
+            {"type":"object","properties":{"component":{"const":"Text"},"text":{"type":"string"}},"required":["component"]}
+            """);
+
+        // A defined entry adds Label and replaces Text, while Button keeps the Basic Catalog definition.
+        Require(registry.TryDerive(CatalogRegistry.BasicCatalogId, "test:derived", new CatalogDerivation
+        {
+            Components = [CatalogEntry.Keep("Button"), CatalogEntry.Define("Label", label.RootElement), CatalogEntry.Define("Text", text.RootElement)],
+            Functions = [CatalogEntry.Keep("openUrl")]
+        }, out var diagnostic), diagnostic);
+        Require(registry.TryGetDefinition(CatalogRegistry.BasicCatalogId, out var basic));
+        Require(registry.TryGetDefinition("test:derived", out var derived));
+        Require(derived.GetProperty("components").EnumerateObject().Select(entry => entry.Name)
+            .OrderBy(name => name, StringComparer.Ordinal).SequenceEqual(["Button", "Label", "Text"]));
+        Require(SameJson(derived.GetProperty("components").GetProperty("Button"), basic.GetProperty("components").GetProperty("Button")));
+        Require(SameJson(derived.GetProperty("components").GetProperty("Text"), text.RootElement));
+        Require(derived.GetProperty("functions").EnumerateObject().Single().Name == "openUrl");
+        Require(!derived.TryGetProperty("instructions", out _) && !derived.TryGetProperty("$id", out _) &&
+            !derived.TryGetProperty("title", out _) && !derived.TryGetProperty("description", out _));
+        Require(basic.TryGetProperty("instructions", out _), diagnostic);
+
+        // The unions in $defs follow the entries, so the new component validates and a dropped one does not.
+        var union = derived.GetProperty("$defs").GetProperty("anyComponent").GetProperty("oneOf").EnumerateArray()
+            .Select(branch => branch.GetProperty("$ref").GetString()).Order(StringComparer.Ordinal).ToArray();
+        Require(union.SequenceEqual(["#/components/Button", "#/components/Label", "#/components/Text"]));
+        Require(registry.ValidateComponent(JsonDocument.Parse("""{"id":"a","component":"Label","text":"Hi"}""").RootElement, "test:derived") is null);
+        Require(registry.ValidateComponent(JsonDocument.Parse("""{"id":"a","component":"Image","url":"x"}""").RootElement, "test:derived")?.Code
+            == "unknownCatalogItem");
+
+        // Instructions are the caller's, and a list left out keeps every entry of that kind.
+        Require(registry.TryDerive("test:derived", "test:copy", new CatalogDerivation { Instructions = "Use test:copy." }, out diagnostic), diagnostic);
+        Require(registry.TryGetDefinition("test:copy", out var copy) && copy.GetProperty("instructions").GetString() == "Use test:copy." &&
+            copy.GetProperty("components").EnumerateObject().Count() == 3);
+
+        // A failed derivation reports the unknown name and registers nothing.
+        Require(!registry.TryDerive("test:derived", "test:failed", new CatalogDerivation { Components = [CatalogEntry.Keep("Slider")] },
+            out diagnostic) && diagnostic?.Code == "unknownCatalogItem" && diagnostic.Message.Contains("component 'Slider'", StringComparison.Ordinal) &&
+            diagnostic.Path == "/components/Slider", diagnostic);
+        Require(!registry.TryDerive("test:derived", "test:failed", ["Label"], ["capitalize"], null, out diagnostic) &&
+            diagnostic?.Message.Contains("function 'capitalize'", StringComparison.Ordinal) == true, diagnostic);
+        Require(!registry.TryDerive("test:derived", "test:failed", new CatalogDerivation { Components = [CatalogEntry.Define("Broken", JsonDocument.Parse("[]").RootElement)] },
+            out diagnostic) && diagnostic?.Code == "invalidCatalogItem", diagnostic);
+        Require(!registry.TryDerive("test:missing", "test:failed", new CatalogDerivation(), out diagnostic) &&
+            diagnostic?.Code == "unknownCatalog", diagnostic);
+        Require(!registry.TryDerive("test:derived", "test:copy", new CatalogDerivation(), out diagnostic) &&
+            diagnostic?.Code == "duplicateCatalog", diagnostic);
+        Require(!registry.CatalogIds.Contains("test:failed"));
+    }
+
+    private static void CheckValidationSchema()
+    {
+        var registry = new CatalogRegistry();
+        Require(!registry.TryCreateValidationSchema("test:missing", out _));
+        Require(registry.TryCreateValidationSchema(CatalogRegistry.BasicCatalogId, out var basic));
+        var button = basic.GetProperty("components").GetProperty("Button");
+        Require(button.GetProperty("required").EnumerateArray().Select(name => name.GetString()).Contains("id") &&
+            !button.TryGetProperty("allOf", out _) && !button.GetProperty("properties").TryGetProperty("@catalogId", out _));
+        Require(button.GetProperty("properties").GetProperty("id").GetProperty("$ref").GetString() == "#/$defs/ComponentId");
+        Require(!basic.TryGetProperty("$id", out _) && !basic.TryGetProperty("title", out _) && basic.TryGetProperty("instructions", out _));
+        RequireLocalReferences(basic, basic, "");
+
+        // A local mixin is flattened, the component's own property wins, and a reference to a leaf def keeps its own description.
+        const string definition = """
+            {"catalogId":"test:mixins","protocolVersion":"1.0",
+             "components":{"Gauge":{"type":"object","description":"A gauge.","allOf":[
+                {"$ref":"common_types.json#/$defs/ComponentCommon"},
+                {"$ref":"#/$defs/Shared"},
+                {"type":"object","properties":{"component":{"const":"Gauge"},"level":{"type":"string"},
+                  "tint":{"$ref":"#/$defs/Tint"}},"required":["component"]}],
+               "unevaluatedProperties":false}},
+             "$defs":{
+               "Shared":{"type":"object","properties":{"level":{"type":"number"},"unit":{"type":"string"}},"required":["unit"]},
+               "Tint":{"type":"string","description":"A colour."},
+               "anyComponent":{"oneOf":[{"$ref":"#/components/Gauge"}],"discriminator":{"propertyName":"component"}},
+               "anyFunction":{"not":{}}}}
+            """;
+        Require(registry.TryRegister(Encoding.UTF8.GetBytes(definition), out var diagnostic), diagnostic);
+        Require(registry.TryCreateValidationSchema("test:mixins", out var custom));
+        var gauge = custom.GetProperty("components").GetProperty("Gauge");
+        var properties = gauge.GetProperty("properties");
+        Require(gauge.GetProperty("description").GetString() == "A gauge." && gauge.GetProperty("unevaluatedProperties").ValueKind == JsonValueKind.False);
+        Require(properties.GetProperty("level").GetProperty("type").GetString() == "string" &&
+            properties.GetProperty("unit").GetProperty("type").GetString() == "string");
+        Require(properties.GetProperty("tint").EnumerateObject().Select(member => member.Name).Order(StringComparer.Ordinal)
+            .SequenceEqual(["$ref"]));
+        Require(properties.TryGetProperty("@accessibility", out _) && properties.TryGetProperty("@metadata", out _) &&
+            !properties.TryGetProperty("@catalogId", out _));
+        Require(gauge.GetProperty("required").EnumerateArray().Select(name => name.GetString()).Order(StringComparer.Ordinal)
+            .SequenceEqual(["component", "id", "unit"]));
+        var definitions = custom.GetProperty("$defs");
+        Require(definitions.TryGetProperty("Tint", out _) && definitions.TryGetProperty("Extensions", out _) &&
+            definitions.TryGetProperty("AccessibilityAttributes", out _) && !definitions.TryGetProperty("Surface", out _));
+        RequireLocalReferences(custom, custom, "");
+    }
+
+    private static bool SameJson(JsonElement left, JsonElement right) =>
+        System.Text.Json.Nodes.JsonNode.DeepEquals(
+            System.Text.Json.Nodes.JsonNode.Parse(left.GetRawText()), System.Text.Json.Nodes.JsonNode.Parse(right.GetRawText()));
+
+    // The schema is self-contained when every reference is a pointer into the document that resolves.
+    private static void RequireLocalReferences(JsonElement value, JsonElement document, string path)
+    {
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in value.EnumerateArray())
+                RequireLocalReferences(item, document, path);
+        }
+        else if (value.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var member in value.EnumerateObject())
+            {
+                if (member.NameEquals("$ref") && member.Value.ValueKind == JsonValueKind.String)
+                {
+                    var reference = member.Value.GetString()!;
+                    var target = document;
+                    Require(reference.StartsWith("#/", StringComparison.Ordinal), new("externalReference", path, reference));
+                    foreach (var segment in reference[2..].Split('/'))
+                        Require(target.ValueKind == JsonValueKind.Object && target.TryGetProperty(segment, out target),
+                            new("unresolvedReference", path, reference));
+                }
+                else if (member.Name is not ("default" or "const" or "enum" or "examples"))
+                    RequireLocalReferences(member.Value, document, path + "/" + member.Name);
+            }
+        }
+    }
     private static void CheckCandidateGraph()
     {
         var registry = new CatalogRegistry();
