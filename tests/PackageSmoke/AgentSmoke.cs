@@ -4,6 +4,44 @@ using A2UI.Core;
 
 internal static class AgentSmoke
 {
+    private static void CheckMixedCatalogDirectJson()
+    {
+        var catalogs = new CatalogRegistry();
+        const string custom = """
+            {"protocolVersion":"1.0","catalogId":"smoke/custom","components":{
+                "Text":{"type":"object","properties":{"component":{"const":"Text"}},"required":["component"]},
+                "Chart":{"type":"object","properties":{"component":{"const":"Chart"}},"required":["component"]}
+            }}
+            """;
+        if (!catalogs.TryRegister(System.Text.Encoding.UTF8.GetBytes(custom), out var registrationError))
+            throw new InvalidOperationException(registrationError?.ToString());
+
+        const string mixed = """
+            [
+                {"version":"1.0","createSurface":{"surfaceId":"report","components":[
+                    {"id":"root","component":"Column","children":["chart","caption"]},
+                    {"id":"chart","component":"Chart"},
+                    {"id":"caption","component":"Text","@catalogId":"smoke/custom"}
+                ]}}
+            ]
+            """;
+        var compilationError = DirectJson.Compile(mixed, catalogs, out var messages);
+        if (compilationError is not null)
+            throw new InvalidOperationException(compilationError.ToString());
+        var payload = messages.Single().Payload;
+        var components = payload.GetProperty("components");
+        if (payload.TryGetProperty("catalogId", out _) ||
+            !components[0].TryGetProperty("@catalogId", out _) ||
+            !components[1].GetProperty("@catalogId").ValueEquals("smoke/custom") ||
+            !components[2].GetProperty("@catalogId").ValueEquals("smoke/custom"))
+            throw new InvalidOperationException("Mixed-catalog routing was not written to the wire.");
+
+        var ambiguous = mixed.Replace(",\"@catalogId\":\"smoke/custom\"", "", StringComparison.Ordinal);
+        if (DirectJson.Compile(ambiguous, catalogs, out var rejected)?.Message.Contains("ambiguous", StringComparison.Ordinal) != true ||
+            rejected.Count != 0)
+            throw new InvalidOperationException("An ambiguous component was accepted.");
+    }
+
     private static void CheckDelivery()
     {
         using var state = new RendererState(new CatalogRegistry());
@@ -315,6 +353,7 @@ internal static class AgentSmoke
     {
         CheckSkillExport();
         CheckDelivery();
+        CheckMixedCatalogDirectJson();
         CheckInboundTurn();
         CheckRendererFunctionCall();
         CheckStreaming();
