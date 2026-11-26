@@ -56,7 +56,8 @@ measured workload and current limits.
 
 The conformance workflow uploads both case reports and a refreshed badge.
 The badge counts each upstream case once and includes excluded cases in the
-total. When a change affects conformance counts, include the refreshed SVG
+total. The badge colour reflects the percentage passing, with bands starting
+at 50%, 80%, 90% and 100%. When a change affects conformance counts, include the refreshed SVG
 in the same PR. To regenerate it locally from the reports above, run:
 
 ```powershell

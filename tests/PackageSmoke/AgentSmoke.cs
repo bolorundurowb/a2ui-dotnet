@@ -448,10 +448,66 @@ internal static class AgentSmoke
             throw new InvalidOperationException("The augmented catalog did not keep the chosen components and the macros.");
     }
 
+    private static void CheckExpress()
+    {
+        var catalogs = new CatalogRegistry();
+        const string block = """
+            surface("form")
+            // A comment, and a statement end that the notation also accepts.
+            root = Column([title, hint]);
+            title = Text("Hello")
+            hint = Text($/hint) -- trailing comment
+            $/hint = "Type here"
+            """;
+        var issue = Express.Compile(block, catalogs, out var messages);
+        if (issue is not null || messages.Count != 1 || messages[0].Kind != "createSurface")
+            throw new InvalidOperationException(issue?.ToString() ?? "Express block did not compile to one surface.");
+        var surface = messages[0].Payload;
+        if (!surface.GetProperty("catalogId").ValueEquals(CatalogRegistry.BasicCatalogId) ||
+            surface.GetProperty("components").GetArrayLength() != 3 ||
+            !surface.GetProperty("dataModel").GetProperty("hint").ValueEquals("Type here"))
+            throw new InvalidOperationException("Express surface differs from its notation.");
+
+        if (Express.Decompile(messages, catalogs, out var text) is { } writeError)
+            throw new InvalidOperationException(writeError.ToString());
+        if (Express.Compile(text, catalogs, out var again) is not null ||
+            DirectJson.Decompile(again) != DirectJson.Decompile(messages))
+            throw new InvalidOperationException("Express text did not compile back to the same messages.");
+
+        // An unterminated block is never compiled, and the text before it stays available for diagnostics.
+        using var state = new RendererState(catalogs);
+        var truncated = Express.ParseResponse("Before\n<a2ui>\nroot = Text(\"Hi\")", state, out var prefix, out var rejected);
+        if (truncated?.Code != "ParseError" || rejected is not null || prefix.Count != 1 || prefix[0].Text != "Before")
+            throw new InvalidOperationException("A truncated Express block was not rejected.");
+        if (!Express.HasFormatContent("<a2ui>\nroot = Text(\"Hi\")") || Express.HasFormatContent("<a2ui>\nroot = Text(\"Hi\")", complete: true))
+            throw new InvalidOperationException("Express format detection ignored the closing tag.");
+        if (!Express.Wrap([new ExpressPart("root = Text(\"Hi\")", true, false)]).EndsWith("</a2ui>", StringComparison.Ordinal))
+            throw new InvalidOperationException("Wrap did not close an unterminated block.");
+
+        // A block of one turn can create a surface that a later turn deletes.
+        foreach (var response in new[] { "<a2ui>\nsurface(\"form\")\nroot = Text(\"Hi\")\n</a2ui>", "<a2ui>\ndeleteSurface(\"form\")\n</a2ui>" })
+        {
+            var failure = Express.ParseResponse(response, state, out var parts, out var candidate);
+            using var turn = candidate;
+            if (failure is not null || turn is null || parts.Count != 1)
+                throw new InvalidOperationException(failure?.ToString() ?? "Express turn did not compile.");
+            turn.Commit();
+            turn.Acknowledge(parts[0].Messages!.Single());
+        }
+
+        if (state.TryGetSurface("form", out _))
+            throw new InvalidOperationException("Deleting an Express surface left it in the mirror.");
+        if (Express.Compile("root = Text(\"Hi\")", new CatalogRegistry(includeBasicCatalog: false), out _)?.Code != "ValidationError")
+            throw new InvalidOperationException("Express compiled without any catalog.");
+        if (Express.Compile("root = Text(\"Hi\"", catalogs, out _)?.Code != "ParseError")
+            throw new InvalidOperationException("Express accepted an unclosed call.");
+    }
+
     internal static void Run()
     {
         CheckMacros();
         CheckSkillExport();
+        CheckExpress();
         CheckDelivery();
         CheckMixedCatalogDirectJson();
         CheckInboundTurn();
