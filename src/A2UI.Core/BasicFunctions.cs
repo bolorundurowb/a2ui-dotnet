@@ -33,6 +33,7 @@ public static class BasicFunctions
 
     private static readonly Dictionary<string, string> CurrencySymbols = new(StringComparer.Ordinal)
     {
+        ["NGN"] = "₦",
         ["USD"] = "$", ["EUR"] = "€", ["GBP"] = "£", ["JPY"] = "¥", ["INR"] = "₹", ["KRW"] = "₩", ["CNY"] = "CN¥",
         ["CAD"] = "CA$", ["AUD"] = "A$", ["NZD"] = "NZ$", ["HKD"] = "HK$", ["MXN"] = "MX$", ["BRL"] = "R$",
         ["ILS"] = "₪", ["VND"] = "₫", ["TWD"] = "NT$"

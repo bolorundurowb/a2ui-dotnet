@@ -595,6 +595,7 @@ internal static class CoreSmoke
         Require(Text("formatNumber", """{"value":-1234.5,"decimals":1}""") == "-1,234.5");
         Require(Text("formatNumber", """{"value":0.5,"decimals":0}""") == "1");
         Require(Fails("formatNumber", """{"value":1,"decimals":21}""", "decimals"));
+        Require(Text("formatCurrency", """{"value":1234.5,"currency":"NGN"}""") == "₦1,234.50");
         Require(Text("formatCurrency", """{"value":1234.5,"currency":"EUR"}""") == "€1,234.50");
         Require(Text("formatCurrency", """{"value":1234,"currency":"JPY"}""") == "¥1,234");
         Require(Text("formatCurrency", """{"value":5,"currency":"chf"}""") == "CHF\u00A05.00");
@@ -848,8 +849,8 @@ internal static class CoreSmoke
         using var change = JsonDocument.Parse("1");
         Require(first.WriteData("main", "/unrelated", change.RootElement) is null && firstSent.Count == 2);
         Require(failed.HasFailed && errors.Count == 1 && errors[0].Code == "EXPRESSION_ERROR" && errors[0].FunctionCallId == failedId);
-        using var dollar = JsonDocument.Parse("\"USD\"");
-        Require(first.WriteData("main", "/other", dollar.RootElement) is null && firstSent.Count == 3);
+        using var naira = JsonDocument.Parse("\"NGN\"");
+        Require(first.WriteData("main", "/other", naira.RootElement) is null && firstSent.Count == 3);
 
         // Deleting the surface cancels the pending call without an error.
         Require(first.Apply(Decode("""{"version":"1.0","deleteSurface":{"surfaceId":"main"}}""")) is null);

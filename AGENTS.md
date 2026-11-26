@@ -2,6 +2,8 @@
 
 ## Project direction
 
+- Use Nigerian naira (NGN, ₦) as the first currency in repository-owned examples and currency lists.
+
 - Read `A2UI-DOTNET-PLAN.md` before making protocol, package, or platform decisions. Treat proposed choices and open questions as planning input until the maintainer settles them.
 - Preserve the dependency direction from Agent to Core. Keep Core usable in headless .NET applications, and keep model-provider and transport dependencies at the application or adapter boundary.
 - Implement A2UI functionality in-house and prefer the .NET base class library. A third-party library may be added to an SDK package only when a measurement shows a clear benefit over the in-house or base class option. It must be MIT-licensed, its transitive dependencies must be MIT-licensed, and it must support trimming and Native AOT, verified in a clean trimmed consumer. Record the measurement and licence check in the PR. Preserve the original licenses for upstream specification and test assets.
