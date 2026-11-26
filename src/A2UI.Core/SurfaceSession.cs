@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text.Json;
 
@@ -75,6 +75,7 @@ public sealed class SurfaceSession : IDisposable
 {
     private static readonly JsonElement EmptyDataModel = ProtocolSchemas.Parse("{}");
     private readonly Dictionary<string, SurfaceSnapshot> _surfaces = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ComponentGraph.LeafValidation> _leafValidation = new(StringComparer.Ordinal);
     private bool _notifying;
     private bool _disposed;
     private readonly CatalogRegistry _catalogs;
@@ -101,6 +102,8 @@ public sealed class SurfaceSession : IDisposable
         var copy = new SurfaceSession(_catalogs, _graphValidation);
         foreach (var surface in _surfaces)
             copy._surfaces.Add(surface.Key, surface.Value);
+        foreach (var graph in _leafValidation)
+            copy._leafValidation.Add(graph.Key, graph.Value);
         return copy;
     }
 
@@ -269,12 +272,13 @@ public sealed class SurfaceSession : IDisposable
             if (WireJson.ExceedsContainerDepth(data))
                 return new("dataModelDepth", kindPath + "/dataModel", "Global recursion limit exceeded.");
             snapshot = new(id, catalogId, send, data,
-                new ReadOnlyDictionary<string, JsonElement>(new Dictionary<string, JsonElement>(StringComparer.Ordinal)));
+                ImmutableDictionary<string, JsonElement>.Empty.WithComparers(StringComparer.Ordinal));
         }
 
+        ComponentGraph.LeafValidation? leafValidation = null;
         if (payload.TryGetProperty("components", out var updates))
         {
-            var components = new Dictionary<string, JsonElement>(snapshot!.Components, StringComparer.Ordinal);
+            var components = ((ImmutableDictionary<string, JsonElement>)snapshot!.Components).ToBuilder();
             var updatePaths = new Dictionary<string, string>(StringComparer.Ordinal);
             var index = 0;
             foreach (var component in updates.EnumerateArray())
@@ -288,9 +292,12 @@ public sealed class SurfaceSession : IDisposable
                     return problem with { Path = componentPath + problem.Path };
                 components[componentId] = component;
             }
-            snapshot = snapshot with { Components = new ReadOnlyDictionary<string, JsonElement>(components) };
-            if (ComponentGraph.Validate(snapshot, _catalogs, _graphValidation, kindPath + "/components",
-                    updatePaths, cancellationToken) is { } graphError)
+            snapshot = snapshot with { Components = components.ToImmutable() };
+            var progressive = _graphValidation == GraphValidationOptions.Progressive;
+            if ((!progressive || !_leafValidation.TryGetValue(id, out var previous) ||
+                    !previous.CanApply(snapshot, _catalogs, updatePaths, cancellationToken)) &&
+                ComponentGraph.Validate(snapshot, _catalogs, _graphValidation, kindPath + "/components",
+                    updatePaths, cancellationToken, progressive ? result => leafValidation = result : null) is { } graphError)
                 return graphError;
         }
 
@@ -304,11 +311,14 @@ public sealed class SurfaceSession : IDisposable
         if (message.Kind == "deleteSurface")
         {
             _surfaces.Remove(id);
+            _leafValidation.Remove(id);
             snapshot = null;
         }
         else
         {
             _surfaces[id] = snapshot!;
+            if (leafValidation is not null)
+                _leafValidation[id] = leafValidation;
         }
 
         Notify(new(message.Kind, id, snapshot));
@@ -356,6 +366,7 @@ public sealed class SurfaceSession : IDisposable
             throw new InvalidOperationException("Complete the current notification before disposing the session.");
         _disposed = true;
         _surfaces.Clear();
+        _leafValidation.Clear();
         Changed = null;
     }
 }

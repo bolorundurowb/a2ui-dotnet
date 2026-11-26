@@ -28,7 +28,7 @@ internal static class ComponentGraph
 {
     internal static A2uiDiagnostic? Validate(SurfaceSnapshot snapshot, CatalogRegistry catalogs,
         GraphValidationOptions options, string path, Dictionary<string, string> updatePaths,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Action<LeafValidation>? capture = null)
     {
         var nodes = new Dictionary<string, Node>(StringComparer.Ordinal);
         var hasIndexCall = false;
@@ -82,9 +82,88 @@ internal static class ComponentGraph
             if (Visit(id, nodes, depths, path, 0, cancellationToken) is { } orphanError)
                 return orphanError;
         }
-        return hasIndexCall && rootNode is not null
+        var scopeError = hasIndexCall && rootNode is not null
             ? ValidateIndexScope(root, nodes, new(StringComparer.Ordinal), cancellationToken)
             : null;
+        if (scopeError is null && capture is not null)
+            capture(new LeafValidation(catalogs.CatalogIds.Count, nodes));
+        return scopeError;
+    }
+
+    // Keep reverse edges even for dangling references so arriving leaves still
+    // check their parents' composition rules and the maximum graph depth.
+    internal sealed class LeafValidation
+    {
+        private readonly int _catalogCount;
+        private readonly Dictionary<string, List<string>> _parents = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Node> _containers = new(StringComparer.Ordinal);
+
+        internal LeafValidation(int catalogCount, Dictionary<string, Node> nodes)
+        {
+            _catalogCount = catalogCount;
+            foreach (var (id, node) in nodes)
+            {
+                if (node.Edges.Count == 0)
+                    continue;
+                _containers.Add(id, node);
+                foreach (var edge in node.Edges)
+                {
+                    if (!_parents.TryGetValue(edge.Id, out var incoming))
+                        _parents.Add(edge.Id, incoming = new());
+                    incoming.Add(id);
+                }
+            }
+        }
+
+        internal bool CanApply(SurfaceSnapshot snapshot, CatalogRegistry catalogs,
+            IReadOnlyDictionary<string, string> updatePaths, CancellationToken cancellationToken)
+        {
+            if (_catalogCount != catalogs.CatalogIds.Count)
+                return false;
+            foreach (var id in updatePaths.Keys)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var component = snapshot.Components[id];
+                if (_containers.ContainsKey(id) || FindIndexCall(component) is not null ||
+                    !catalogs.TryGetComponentSchema(component, snapshot.CatalogId, out var document, out var schema))
+                    return false;
+
+                var edges = new List<Edge>();
+                Collect(component, schema, document, "", edges, 0, catalogs, snapshot.CatalogId);
+                if (edges.Count > 0)
+                    return false;
+                if (id == snapshot.RootComponentId && !Allows(schema, "allowedParents", "Surface"))
+                    return false;
+                if (!_parents.TryGetValue(id, out var incoming))
+                    continue;
+
+                var type = component.GetProperty("component").GetString()!;
+                foreach (var parentId in incoming)
+                {
+                    var parent = _containers[parentId];
+                    if (!Allows(parent.Schema, "allowedChildren", type) || !Allows(schema, "allowedParents", parent.Type))
+                        return false;
+                }
+                if (MayExceedDepth(id, 0, new(StringComparer.Ordinal), cancellationToken))
+                    return false;
+            }
+            return true;
+        }
+
+        private bool MayExceedDepth(string id, int depth, Dictionary<string, int> visited,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (depth > WireJson.RecursionLimit)
+                return true;
+            if (!_parents.TryGetValue(id, out var incoming) || visited.GetValueOrDefault(id, -1) >= depth)
+                return false;
+            visited[id] = depth;
+            foreach (var parent in incoming)
+                if (MayExceedDepth(parent, depth + 1, visited, cancellationToken))
+                    return true;
+            return false;
+        }
     }
 
     private static A2uiDiagnostic DisallowedParent(string id, Node node, string parent, string parentType) =>
@@ -229,6 +308,6 @@ internal static class ComponentGraph
                         Collect(value, branch, document, path, edges, depth + 1, catalogs, surfaceCatalogId);
     }
 
-    private sealed record Node(string Type, JsonElement Schema, List<Edge> Edges, string Path, string? IndexCallPath);
+    internal sealed record Node(string Type, JsonElement Schema, List<Edge> Edges, string Path, string? IndexCallPath);
     internal sealed record Edge(string Id, string Path, string? TemplatePath = null);
 }
