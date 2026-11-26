@@ -19,7 +19,7 @@ The first turn negotiates capabilities, creates the form and sends separate comp
 | Direct JSON | Batch compile, decompile and response parsing, plus incremental streaming with ordered text and UI, partial-result diagnostics, cancellation and size limits. | The pinned 1.0 compile, decompile, response parsing and streaming cases pass, including all 15 mixed-catalog batch cases and 57 streaming cases. The 82 v0.8 and v0.9 streaming cases are excluded as legacy. Smoke tests cover cancellation, the size limit and failure after a partial send. The four streaming growth and overhead cases fail the upstream limits. See [#73](https://github.com/bolorundurowb/a2ui-dotnet/issues/73). |
 | Express | Batch compile, decompile, wrapping, response parsing and prompt generation with the Basic Catalog golden corpus. | Pending pinned Agent cases and scaling checks. |
 | Express streaming | Incremental parsing and emission, ordered text and UI, and diagnostics for partial or malformed output. | Pending [#33](https://github.com/bolorundurowb/a2ui-dotnet/issues/33) and the pinned Express streaming cases. |
-| Agent macros | Catalog-aware expansion with scoped IDs, nested macros and shared Core validation. | Pending [#34](https://github.com/bolorundurowb/a2ui-dotnet/issues/34) and the pinned v1.0 macro cases. |
+| Agent macros | Catalog-aware expansion with scoped IDs, nested macros and shared Core validation. | `MacroExpander` passes 45 of the 46 pinned macro cases that use a 1.0 envelope. The 24 v0.9 cases and one case that sends `"@catalogId": null` are excluded. See [Agent macros](#agent-macros). |
 | Trimming and Native AOT | Preserve support in the Core and Agent API design. Verify headless consumers for each claimed deployment target. | Windows x64 scaffold publish and execution passed for trimmed .NET 8 and Native AOT .NET 8 and 10. A trimmed .NET 8 Core package consumer and a .NET 8 Native AOT smoke application passed with the wire, catalog and surface APIs. Broader deployment verification is pending. |
 
 ## Core catalog verification
@@ -89,6 +89,28 @@ On .NET 8.0.34 for Windows x64, the Release conformance run passed 531 Core and 
 | `accessibility.yaml` | 5 | The adapter checks explicit attributes. Implied names, platform roles and interactive states, and axe-core checks belong to a renderer adapter. The transitional bare `accessibility` case disagrees with the pinned schema and is excluded. |
 
 [Core blueprint](https://github.com/a2ui-project/a2ui/blob/d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe/blueprints/modules/a2ui_core.blueprint.md) · [Pinned Core fixtures](https://github.com/a2ui-project/a2ui/tree/d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe/conformance/core)
+
+## Agent macros
+
+`MacroExpander` replaces each macro component in ordered 1.0 agent messages with the catalog components it stands for. Other components and messages keep their order. The root of an expansion keeps the ID of the call, and generated components are named `<call ID>__<name>_<n>`, children before parents. Each component uses the catalog from its `@catalogId`, then the catalog of the macro that emitted it, then the surface default. On a surface whose default catalog the application did not register, components that name no catalog are left alone. Expansion stops with `RecursionError` beyond `MaxDepth` (32 by default), and with `ExpansionLimitError` beyond `MaxComponents` (10,000). A macro call with unsuitable arguments stays in the output by default, or stops the expansion when `ErrorMode` is `Raise`. `CreateCatalog` and `AugmentCatalog` write catalogs that a model can use to call the macros. Validate the expansion with `RendererState.Prepare` or a `SurfaceSession`, as for any other agent messages.
+
+On .NET 8.0.34 for Windows x64, the Release conformance run against `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe` passed 531 Core and 405 Agent cases, with 334 Core and 625 Agent exclusions and no failures. It is 45 more Agent passes than before the macro work. The suite in `conformance/agent/macros/macros.yaml` has 70 cases.
+
+| Group | Cases | Result |
+| --- | ---: | --- |
+| 1.0 envelope, including the `v1_0` twin cases | 45 | Pass |
+| `36_surface_lifecycle_delete_recreate_and_null_catalog_id` | 1 | Excluded. The pinned message schema requires `@catalogId` to be a string, so Core rejects the null before the expander sees it. |
+| v0.9 envelope, which is the suite default | 24 | Excluded as outside the profile |
+
+The harness reads `envelope_version` for each case. A case that names only a `version` or an `expander_protocol_version` uses that value, and one that names none is v0.9. These adaptations are needed to run the pinned fixtures:
+
+- Custom catalogs refer to `common_types.json` by absolute URL. The harness changes the reference to the relative form that Core resolves offline.
+- The suite describes two behaviours only as comments beside the template. `StatusBadge` and `AnnotatedBadge` upper-case `status`, and `PositiveCountCard` rejects a negative count. The harness adds both.
+- The templates use the heading variants `h1` to `h3`. The pinned 1.0 Basic Catalog only has `caption` and `body`, and the 1.0 goldens use `body`, so the harness uses `body`.
+- `org.a2ui.basic` is registered as another name of the Basic Catalog, because `08_surface_lifecycle_envelopes` uses it.
+- `allow_missing_root` also allows orphan components, since nothing can be reachable from a root that does not exist.
+
+Focused regression checks in the package smoke test cover ID namespacing and order, the depth and size limits, passthrough and raise modes, the reserved `Surface` name and the default macro catalog rewrite. They also check that the generated catalogs register in Core and that the expansion passes `RendererState.Prepare`. The trimmed .NET 8 and Native AOT .NET 8 deployment smoke runs include them and produced no analyser warnings. [Pinned macro cases](https://github.com/a2ui-project/a2ui/blob/d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe/conformance/agent/macros/macros.yaml)
 
 ## Optional integrations
 
