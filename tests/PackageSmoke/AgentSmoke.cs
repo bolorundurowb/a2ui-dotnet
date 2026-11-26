@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using A2UI.Agent;
 using A2UI.Core;
 
@@ -349,8 +350,107 @@ internal static class AgentSmoke
             throw new InvalidOperationException("The renderer function response was not correlated exactly once.");
     }
 
+    private static MacroExpander NewExpander(MacroExpanderOptions? options = null)
+    {
+        var greeting = MacroDefinition.FromTemplate("Greeting", [new MacroParameter("name", MacroParameterType.String)],
+            Node("""{"component":"Card","child":{"component":"Text","text":"Hello ${name}"}}"""));
+        var loop = MacroDefinition.FromTemplate("Loop", [], Node("""{"component":"Card","child":{"component":"Loop"}}"""));
+        var surface = MacroDefinition.FromTemplate("Sneaky", [], Node("""{"component":"Surface"}"""));
+        var many = new MacroDefinition("Many", [new MacroParameter("count", MacroParameterType.Integer)], invocation =>
+        {
+            var children = new JsonArray();
+            for (var index = 0; index < invocation.Arguments["count"]!.GetValue<int>(); index++)
+                children.Add((JsonNode)new JsonObject
+                {
+                    ["component"] = "Text",
+                    ["text"] = "Row " + index
+                });
+            return MacroResult.Success(new JsonObject { ["component"] = "Column", ["children"] = children });
+        });
+        var problem = MacroExpander.Create([greeting, loop, surface, many], new CatalogRegistry(), out var expander, options);
+        return expander ?? throw new InvalidOperationException(problem?.ToString());
+
+        static JsonObject Node(string json) => JsonNode.Parse(json)!.AsObject();
+    }
+
+    private static A2uiDiagnostic? Expand(MacroExpander expander, out IReadOnlyList<WireMessage> expanded, params string[] messages) =>
+        expander.Expand(messages.Select(Decode), out expanded);
+
+    private static string Basic => CatalogRegistry.BasicCatalogId;
+
+    private static void CheckMacros()
+    {
+        var expander = NewExpander();
+        var surface = $$$"""{"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"{{{Basic}}}"}}""";
+        var update = """
+            {"version":"1.0","updateComponents":{"surfaceId":"s","components":[
+                {"id":"root","component":"Column","children":["a","b"]},
+                {"id":"a","component":"Greeting","name":"Ada"},
+                {"id":"b","component":"Greeting","name":"Grace"}]}}
+            """;
+        if (Expand(expander, out var expanded, surface, update) is { } failure)
+            throw new InvalidOperationException(failure.ToString());
+        var ids = expanded[1].Payload.GetProperty("components").EnumerateArray().Select(item => item.GetProperty("id").GetString()).ToArray();
+        if (expanded.Count != 2 || expanded[0].Kind != "createSurface" ||
+            !ids.SequenceEqual(["root", "a__text_1", "a", "b__text_1", "b"]))
+            throw new InvalidOperationException("Expansion did not keep order or namespace the generated IDs: " + string.Join(",", ids));
+        using var host = new RendererState(new CatalogRegistry());
+        if (host.Prepare(expanded, out var turn) is { } invalid)
+            throw new InvalidOperationException("The host rejected the expansion: " + invalid);
+        turn!.Dispose();
+
+        var loop = Expand(NewExpander(new() { MaxDepth = 4 }), out _, surface,
+            """{"version":"1.0","updateComponents":{"surfaceId":"s","components":[{"id":"root","component":"Loop"}]}}""");
+        if (loop?.Code != "RecursionError")
+            throw new InvalidOperationException("Runaway recursion was not stopped: " + loop);
+
+        var many = """{"version":"1.0","updateComponents":{"surfaceId":"s","components":[{"id":"root","component":"Many","count":5}]}}""";
+        var limit = Expand(NewExpander(new() { MaxComponents = 3 }), out _, surface, many);
+        if (limit?.Code != "ExpansionLimitError" || Expand(NewExpander(new() { MaxComponents = 6 }), out _, surface, many) is not null)
+            throw new InvalidOperationException("The component limit was not enforced exactly: " + limit);
+
+        const string badArgument = """
+            {"version":"1.0","updateComponents":{"surfaceId":"s","components":[
+                {"id":"root","component":"Column","children":["bad","ok"]},
+                {"id":"bad","component":"Greeting","name":5},
+                {"id":"ok","component":"Greeting","name":"Ada"}]}}
+            """;
+        if (Expand(expander, out var kept, surface, badArgument) is { } unexpected)
+            throw new InvalidOperationException(unexpected.ToString());
+        var kinds = kept[1].Payload.GetProperty("components").EnumerateArray().Select(item => item.GetProperty("id").GetString()).ToArray();
+        if (!kinds.SequenceEqual(["root", "bad", "ok__text_1", "ok"]))
+            throw new InvalidOperationException("Passthrough did not keep the bad call and expand its sibling: " + string.Join(",", kinds));
+        if (Expand(NewExpander(new() { ErrorMode = MacroErrorMode.Raise }), out _, surface, badArgument)?.Code != "ValidationError")
+            throw new InvalidOperationException("Raise mode did not report the bad argument.");
+
+        var reserved = Expand(expander, out _, surface,
+            """{"version":"1.0","updateComponents":{"surfaceId":"s","components":[{"id":"root","component":"Sneaky"}]}}""");
+        if (reserved?.Code != "ValidationError")
+            throw new InvalidOperationException("A macro emitted the reserved Surface component: " + reserved);
+
+        var sidecar = $$$"""{"version":"1.0","createSurface":{"surfaceId":"m","catalogId":"{{{MacroExpander.DefaultCatalogId}}}"}}""";
+        var sidecarError = Expand(expander, out var rewritten, sidecar);
+        if (sidecarError is not null || !rewritten[0].Payload.GetProperty("catalogId").ValueEquals(Basic))
+            throw new InvalidOperationException("The macro catalog default was not replaced by the registered catalog: " + sidecarError);
+
+        var catalogError = expander.CreateCatalog(null, out var standalone);
+        if (catalogError is not null || !standalone.Contains("\"Greeting\"", StringComparison.Ordinal))
+            throw new InvalidOperationException("The standalone macro catalog was not usable: " + catalogError);
+        var augmentError = expander.AugmentCatalog(Basic, "smoke/with-macros", ["Text"], out var augmented);
+        var catalogs = new CatalogRegistry(includeBasicCatalog: false);
+        A2uiDiagnostic? registrationError = null;
+        if (augmentError is not null || !catalogs.TryRegister(System.Text.Encoding.UTF8.GetBytes(augmented), out registrationError) ||
+            !catalogs.TryGetDefinition("smoke/with-macros", out var definition))
+            throw new InvalidOperationException("The augmented catalog was not usable: " + (augmentError ?? registrationError));
+        var components = definition.GetProperty("components");
+        if (!components.TryGetProperty("Greeting", out _) || !components.TryGetProperty("Text", out _) ||
+            components.TryGetProperty("Card", out _))
+            throw new InvalidOperationException("The augmented catalog did not keep the chosen components and the macros.");
+    }
+
     internal static void Run()
     {
+        CheckMacros();
         CheckSkillExport();
         CheckDelivery();
         CheckMixedCatalogDirectJson();
