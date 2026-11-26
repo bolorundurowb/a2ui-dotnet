@@ -1,0 +1,60 @@
+{
+  "opening": [
+    {
+      "version": "1.0",
+      "createSurface": {
+        "surfaceId": "APPOINTMENT_SURFACE_ID",
+        "catalogId": "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json",
+        "sendDataModel": true,
+        "dataModel": {"name": "", "slots": [{"label": "Morning"}, {"label": "Afternoon"}]},
+        "components": [
+          {"id": "root", "component": "Column", "children": ["name", "slots", "submit", "label"]},
+          {"id": "name", "component": "TextField", "label": "Name", "value": {"@path": "/name"}},
+          {"id": "slots", "component": "Column", "children": {"componentId": "slot", "path": "/slots"}},
+          {"id": "slot", "component": "Text", "text": {"@path": "label"}},
+          {
+            "id": "submit",
+            "component": "Button",
+            "child": "submitLabel",
+            "action": {"event": {"name": "book", "context": {"name": {"@path": "/name"}}}}
+          },
+          {"id": "submitLabel", "component": "Text", "text": "Book"},
+          {"id": "label", "component": "Text", "text": "Choose a slot"}
+        ]
+      }
+    },
+    {
+      "version": "1.0",
+      "updateComponents": {
+        "surfaceId": "APPOINTMENT_SURFACE_ID",
+        "components": [
+          {
+            "id": "name",
+            "component": "TextField",
+            "label": "Name",
+            "value": {"@path": "/name"},
+            "@checks": [{"condition": {"@call": "required", "args": {"value": {"@path": "/name"}}}, "message": "Enter a name"}]
+          }
+        ]
+      }
+    },
+    {
+      "version": "1.0",
+      "updateDataModel": {
+        "surfaceId": "APPOINTMENT_SURFACE_ID",
+        "path": "/slots",
+        "value": [{"label": "Afternoon"}, {"label": "Morning"}]
+      }
+    }
+  ],
+  "confirmation": [
+    {
+      "version": "1.0",
+      "updateComponents": {
+        "surfaceId": "APPOINTMENT_SURFACE_ID",
+        "components": [{"id": "label", "component": "Text", "text": "Appointment confirmed"}]
+      }
+    },
+    {"version": "1.0", "deleteSurface": {"surfaceId": "APPOINTMENT_SURFACE_ID"}}
+  ]
+}
