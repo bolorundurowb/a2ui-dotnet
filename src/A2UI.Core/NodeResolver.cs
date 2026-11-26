@@ -39,7 +39,7 @@ public enum CheckState
     /// <summary>The condition has no value yet: its binding has no data or its function call failed.</summary>
     Unresolved,
 
-    /// <summary>The condition waits for an answer from the agent. Nothing produces this state until agent function routing exists.</summary>
+    /// <summary>The condition waits for an answer from the agent. A pending rule does not block validity.</summary>
     Pending,
 
     /// <summary>The condition passed.</summary>
@@ -89,7 +89,7 @@ public sealed class ResolvedNode
     /// <summary>The check rules from <c>@checks</c> or <c>checks</c>, in declaration order.</summary>
     public IReadOnlyList<CheckResult> Checks { get; internal set; } = [];
 
-    /// <summary>Whether no check with error severity has failed. Warnings, information and unresolved rules do not block.</summary>
+    /// <summary>Whether no check with error severity has failed. Warnings, information, pending and unresolved rules do not block.</summary>
     public bool IsValid => BlockingResult is null;
 
     /// <summary>The failed results, in declaration order, including warnings and information.</summary>
@@ -113,15 +113,19 @@ public sealed class ResolvedNode
 
     internal IReadOnlyDictionary<string, JsonElement> Actions { get; set; } = new Dictionary<string, JsonElement>();
 
+    internal IReadOnlyList<string> ChildInstanceIds { get; set; } = [];
+
     internal string Signature { get; set; } = "";
 }
 
 /// <summary>Projects the mounted tree of one surface into resolved nodes and reports creation and property changes.</summary>
 /// <remarks>
-/// The resolver subscribes to the session and refreshes after each committed change to its surface. Callers serialize
+/// The resolver subscribes to the session and refreshes after each committed change to its surface. Callers serialise
 /// access with the session. The resolver attaches when the surface appears and disposes when it is deleted.
 /// Template items retain identity across moves by matching their JSON values, in list order for duplicates.
 /// An unmatched item reuses the unmatched occurrence at its original index, allowing in-place value edits.
+/// A resolver created with a <see cref="FunctionCallRouter"/> sends the calls the renderer cannot run to the agent. Deliver
+/// the agent's answers through <see cref="FunctionCallRouter.ReceiveResponse"/>, serialised with the session.
 /// </remarks>
 public sealed class NodeResolver : IDisposable
 {
@@ -130,11 +134,15 @@ public sealed class NodeResolver : IDisposable
     private readonly SurfaceSession _session;
     private readonly CatalogRegistry _catalogs;
     private readonly FunctionEvaluator _functions;
+    private readonly FunctionCallRouter? _router;
     private readonly ActionDispatcher _actions;
     private readonly string _surfaceId;
     private Dictionary<string, ResolvedNode> _nodesByInstance = new(StringComparer.Ordinal);
     private Dictionary<string, TemplateItems> _templateItems = new(StringComparer.Ordinal);
+    private Dictionary<string, Dictionary<string, BoundExpression>> _bindings = new(StringComparer.Ordinal);
+    private List<(string InstanceId, string Key, BoundExpression Bound)>? _settledDuringRefresh;
     private long _nextItemId;
+    private bool _refreshing;
     private bool _disposed;
 
     /// <summary>Creates a resolver for one surface and starts tracking it.</summary>
@@ -145,9 +153,40 @@ public sealed class NodeResolver : IDisposable
     /// <param name="timeProvider">The clock for action timestamps. Defaults to <see cref="TimeProvider.System"/>.</param>
     public NodeResolver(SurfaceSession session, CatalogRegistry catalogs, string surfaceId, FunctionEvaluator? functions = null,
         TimeProvider? timeProvider = null)
+        : this(session, catalogs, surfaceId, functions, (FunctionCallRouter?)null, timeProvider)
+    {
+    }
+
+    /// <summary>Creates a resolver for one surface whose properties and check rules can wait for agent function calls.</summary>
+    /// <param name="session">The session that owns the surface. It must be the session of <paramref name="router"/>.</param>
+    /// <param name="catalogs">The registry that supplies component schemas. It must be the registry of <paramref name="router"/>.</param>
+    /// <param name="surfaceId">The identifier of the surface to resolve.</param>
+    /// <param name="router">The router that sends calls to the agent. The resolver also uses the router's evaluator for local calls.</param>
+    /// <param name="timeProvider">The clock for action timestamps. Defaults to <see cref="TimeProvider.System"/>.</param>
+    /// <remarks>
+    /// A property or check condition that calls a function the agent runs has no value while the call is pending. When the
+    /// answer arrives, the resolver raises <see cref="PropsChanged"/> for that node. A pending check rule reports
+    /// <see cref="CheckState.Pending"/> and does not block validity. A check rule whose call failed is
+    /// <see cref="CheckState.Invalid"/> with the rule's message. Detaching a node, deleting the surface or disposing the
+    /// resolver cancels the node's pending calls unless another binding shares them, and the agent's late answers are ignored.
+    /// Without an agent client that can send, or after the router is disposed, such calls fail locally as they do without a router.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The router belongs to another session or catalog registry.</exception>
+    public NodeResolver(SurfaceSession session, CatalogRegistry catalogs, string surfaceId, FunctionCallRouter router,
+        TimeProvider? timeProvider = null)
+        : this(session, catalogs, surfaceId, (router ?? throw new ArgumentNullException(nameof(router))).Functions, router,
+            timeProvider)
+    {
+    }
+
+    private NodeResolver(SurfaceSession session, CatalogRegistry catalogs, string surfaceId, FunctionEvaluator? functions,
+        FunctionCallRouter? router, TimeProvider? timeProvider)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _catalogs = catalogs ?? throw new ArgumentNullException(nameof(catalogs));
+        if (router is not null && (!ReferenceEquals(router.Session, session) || !ReferenceEquals(router.Catalogs, catalogs)))
+            throw new ArgumentException("The router must use the same session and catalog registry as the resolver.", nameof(router));
+        _router = router;
         _functions = functions ?? new FunctionEvaluator(catalogs);
         _actions = new ActionDispatcher(_functions, timeProvider);
         _surfaceId = surfaceId ?? throw new ArgumentNullException(nameof(surfaceId));
@@ -206,13 +245,71 @@ public sealed class NodeResolver : IDisposable
         return _actions.Dispatch(snapshot, node.ComponentId, node.DataPath, action, userInitiated, metadata);
     }
 
-    /// <summary>Stops tracking the surface and clears the mounted nodes.</summary>
+    /// <summary>Runs an action property on a node through the router, so that calls in the action can wait for the agent.</summary>
+    /// <param name="node">A node from <see cref="Nodes"/>.</param>
+    /// <param name="property">The name of a property whose resolved kind is an action.</param>
+    /// <param name="userInitiated">Whether the invocation follows a user gesture.</param>
+    /// <param name="metadata">Optional <c>action.metadata</c> to attach to the <c>action</c> message of an event.</param>
+    /// <returns>An <c>INVALID_ACTION</c> error when the property is not an action of a mounted node, or null when the router runs the action.</returns>
+    /// <remarks>
+    /// The router raises <see cref="FunctionCallRouter.ActionDispatched"/> when an event completes and
+    /// <see cref="FunctionCallRouter.ErrorReported"/> when the action fails. Context bindings are read while the action runs.
+    /// An action keeps running after its node detaches. Deleting the surface abandons it.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The resolver was created without a router.</exception>
+    public RendererError? RouteAction(ResolvedNode node, string property, bool userInitiated = true, JsonElement? metadata = null)
+    {
+        if (FindRoutedAction(node, property, out var error) is not { } action)
+            return error;
+        _router!.Invoke(_surfaceId, node.ComponentId, node.DataPath, action, userInitiated, metadata);
+        return null;
+    }
+
+    /// <summary>Runs a function action property on a node through the router and delivers its successful result.</summary>
+    /// <param name="node">A node from <see cref="Nodes"/>.</param>
+    /// <param name="property">The name of a property whose resolved kind is an action with a <c>functionCall</c> member.</param>
+    /// <param name="completed">Receives the function result, possibly before the method returns. Failures are reported through <see cref="FunctionCallRouter.ErrorReported"/>.</param>
+    /// <param name="userInitiated">Whether the invocation follows a user gesture.</param>
+    /// <returns>An <c>INVALID_ACTION</c> error when the property is not an action of a mounted node, or null when the router runs the action.</returns>
+    /// <exception cref="InvalidOperationException">The resolver was created without a router.</exception>
+    public RendererError? RouteFunctionAction(ResolvedNode node, string property, Action<JsonElement> completed,
+        bool userInitiated = true)
+    {
+        ArgumentNullException.ThrowIfNull(completed);
+        if (FindRoutedAction(node, property, out var error) is not { } action)
+            return error;
+        _router!.InvokeFunctionAction(_surfaceId, node.ComponentId, node.DataPath, action, completed, userInitiated);
+        return null;
+    }
+
+    private JsonElement? FindRoutedAction(ResolvedNode node, string property, out RendererError? error)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        ArgumentNullException.ThrowIfNull(property);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_router is null)
+            throw new InvalidOperationException("The resolver was created without a router.");
+        error = null;
+        if (!_session.TryGetSurface(_surfaceId, out _))
+            error = RendererError.FromDiagnostic(new("unknownSurface", "", $"Surface '{_surfaceId}' does not exist."), _surfaceId);
+        else if (!IsMounted(node) || !node.Actions.TryGetValue(property, out var action))
+            error = RendererError.FromDiagnostic(new("invalidAction", "", $"The property '{property}' is not an action."), _surfaceId);
+        else
+            return action;
+        return null;
+    }
+
+    /// <summary>Stops tracking the surface, clears the mounted nodes and cancels their pending agent calls.</summary>
     public void Dispose()
     {
         if (_disposed)
             return;
         _disposed = true;
         _session.Changed -= OnChanged;
+        foreach (var slots in _bindings.Values)
+            foreach (var bound in slots.Values)
+                bound.Binding.Dispose();
+        _bindings.Clear();
         _nodesByInstance.Clear();
         _templateItems.Clear();
         Nodes = [];
@@ -251,13 +348,28 @@ public sealed class NodeResolver : IDisposable
         var changed = new List<ResolvedNode>();
         var metadataChanged = new List<ResolvedNode>();
         var accessibilityChanged = new List<ResolvedNode>();
+        var previousBindings = _bindings;
+        var nextBindings = new Dictionary<string, Dictionary<string, BoundExpression>>(StringComparer.Ordinal);
 
-        if (occurrences is not null && snapshot is not null)
-            Visit(occurrences, ancestorHidden: false);
+        _refreshing = true;
+        try
+        {
+            if (occurrences is not null && snapshot is not null)
+                Visit(occurrences, ancestorHidden: false);
+        }
+        finally
+        {
+            _refreshing = false;
+        }
 
         _templateItems = templates;
         _nodesByInstance = next;
+        _bindings = nextBindings;
         Nodes = ordered.AsReadOnly();
+        // Bindings of detached nodes, and of expressions that changed, cancel the calls no other binding shares.
+        foreach (var slots in previousBindings.Values)
+            foreach (var bound in slots.Values)
+                bound.Binding.Dispose();
         foreach (var node in created)
             NodeCreated?.Invoke(node);
         foreach (var node in changed)
@@ -266,6 +378,12 @@ public sealed class NodeResolver : IDisposable
             MetadataChanged?.Invoke(node);
         foreach (var node in accessibilityChanged)
             AccessibilityChanged?.Invoke(node);
+        if (_settledDuringRefresh is { } settled)
+        {
+            _settledDuringRefresh = null;
+            foreach (var (instanceId, key, bound) in settled)
+                OnBindingChanged(instanceId, key, bound);
+        }
 
         IReadOnlyList<string> IdentifyItems(string template, JsonElement list)
         {
@@ -277,9 +395,15 @@ public sealed class NodeResolver : IDisposable
 
         void Visit(ComponentOccurrence occurrence, bool ancestorHidden)
         {
-            var properties = ResolveProperties(occurrence, snapshot!);
-            var checks = ResolveChecks(occurrence, snapshot!);
-            var signature = Signature(properties, checks, occurrence.Children);
+            previousBindings.TryGetValue(occurrence.InstanceId, out var previousSlots);
+            var scope = new NodeScope(snapshot!, occurrence.InstanceId, occurrence.DataPath, previousSlots,
+                new(StringComparer.Ordinal));
+            var properties = ResolveProperties(occurrence, scope);
+            var checks = ResolveChecks(occurrence, scope);
+            if (scope.Next.Count > 0)
+                nextBindings[occurrence.InstanceId] = scope.Next;
+            var childInstanceIds = occurrence.Children.Select(child => child.InstanceId).ToArray();
+            var signature = Signature(properties, checks, childInstanceIds);
             JsonElement? metadata = occurrence.Definition.TryGetProperty("@metadata", out var envelope) ? envelope : null;
             var accessibility = ResolveAccessibility(occurrence, snapshot!, ancestorHidden);
             var hidden = accessibility is { } attributes && attributes.TryGetProperty("hidden", out var hiddenValue) &&
@@ -309,6 +433,7 @@ public sealed class NodeResolver : IDisposable
             node.Checks = checks;
             node.Metadata = metadata;
             node.Accessibility = accessibility;
+            node.ChildInstanceIds = childInstanceIds;
             node.Signature = signature;
             next[occurrence.InstanceId] = node;
             ordered.Add(node);
@@ -359,23 +484,24 @@ public sealed class NodeResolver : IDisposable
         }
     }
 
-    private Dictionary<string, ResolvedProperty> ResolveProperties(ComponentOccurrence occurrence, SurfaceSnapshot surface)
+    private Dictionary<string, ResolvedProperty> ResolveProperties(ComponentOccurrence occurrence, NodeScope scope)
     {
         var properties = new Dictionary<string, ResolvedProperty>(StringComparer.Ordinal);
-        var booleanProperties = BooleanProperties(occurrence.Definition, surface.CatalogId);
+        var booleanProperties = BooleanProperties(occurrence.Definition, scope.Surface.CatalogId);
         foreach (var property in occurrence.Definition.EnumerateObject())
         {
             if (property.Name is "component" or "id" || property.Name.StartsWith('@'))
                 continue;
-            properties[property.Name] = ResolveProperty(occurrence, property.Name, property.Value, surface,
+            properties[property.Name] = ResolveProperty(occurrence, property.Name, property.Value, scope,
                 booleanProperties.Contains(property.Name));
         }
         return properties;
     }
 
     private ResolvedProperty ResolveProperty(ComponentOccurrence occurrence, string name, JsonElement value,
-        SurfaceSnapshot surface, bool coerceBoolean)
+        NodeScope scope, bool coerceBoolean)
     {
+        var surface = scope.Surface;
         var childPositions = ChildPositions(occurrence, name);
         if (childPositions.Count > 0 && value.ValueKind == JsonValueKind.String)
             return new(ResolvedPropertyKind.Child, null, false, null, childPositions);
@@ -392,6 +518,8 @@ public sealed class NodeResolver : IDisposable
 
         if (value.ValueKind == JsonValueKind.Object && value.TryGetProperty("@call", out _))
         {
+            if (Route(scope, name, value) is { } routed)
+                return routed.AsProperty(name, ResolvedPropertyKind.Binding, coerceBoolean);
             // A failed call leaves the binding without a value, like a path with no data.
             JsonElement? result = _functions.TryEvaluate(surface, occurrence.DataPath, value, userInitiated: false,
                 out var computed, out _) ? computed : null;
@@ -401,9 +529,96 @@ public sealed class NodeResolver : IDisposable
         if (IsAction(value))
             return new(ResolvedPropertyKind.Action, null, false, null, []);
 
+        if (Route(scope, name, value) is { } nested)
+            return nested.AsProperty(name, ResolvedPropertyKind.Value, coerceBoolean: false);
         JsonElement? resolved = _functions.TryResolveValue(surface, occurrence.DataPath, value, userInitiated: false,
             out var literal, out _) ? literal : null;
         return new(ResolvedPropertyKind.Value, resolved, false, null, []);
+    }
+
+    // Binds an expression that calls the agent through the router, reusing the node's binding while the expression and
+    // scope stay the same. Returns null when the expression resolves locally.
+    private BoundExpression? Route(NodeScope scope, string key, JsonElement expression)
+    {
+        if (_router is not { CanRoute: true } router || !CallsAgent(expression, scope.Surface))
+            return null;
+
+        var text = expression.GetRawText();
+        BoundExpression? previous = null;
+        scope.Previous?.Remove(key, out previous);
+        if (previous is { Binding.Ended: false } && previous.Expression == text && previous.DataPath == scope.DataPath)
+        {
+            router.Reevaluate(previous.Binding);
+            scope.Next[key] = previous;
+            return previous;
+        }
+
+        // Bind before releasing the previous binding, so that a call both share stays pending.
+        var binding = router.BindManaged(_surfaceId, scope.DataPath, expression);
+        var bound = new BoundExpression(binding, text, scope.DataPath);
+        var instanceId = scope.InstanceId;
+        binding.Changed += () => OnBindingChanged(instanceId, key, bound);
+        previous?.Binding.Dispose();
+        scope.Next[key] = bound;
+        return bound;
+    }
+
+    // Updates only the property or check whose call settled, as the Core blueprint requires.
+    private void OnBindingChanged(string instanceId, string key, BoundExpression bound)
+    {
+        if (_disposed)
+            return;
+        if (_refreshing)
+        {
+            (_settledDuringRefresh ??= []).Add((instanceId, key, bound));
+            return;
+        }
+        if (!_nodesByInstance.TryGetValue(instanceId, out var node) || !_bindings.TryGetValue(instanceId, out var slots) ||
+            !slots.TryGetValue(key, out var current) || !ReferenceEquals(current, bound))
+            return;
+
+        if (bound.Property is { } name)
+        {
+            node.Props = new Dictionary<string, ResolvedProperty>(node.Props, StringComparer.Ordinal)
+            {
+                [name] = bound.ToProperty()
+            };
+        }
+        else
+        {
+            var checks = node.Checks.ToArray();
+            checks[bound.CheckIndex] = bound.ToCheck();
+            node.Checks = checks;
+        }
+
+        var signature = Signature(node.Props, node.Checks, node.ChildInstanceIds);
+        if (signature == node.Signature)
+            return;
+        node.Signature = signature;
+        PropsChanged?.Invoke(node);
+    }
+
+    // Whether the expression contains a call that the router sends to the agent. Local and refused calls resolve locally.
+    private bool CallsAgent(JsonElement value, SurfaceSnapshot surface)
+    {
+        if (value.ValueKind == JsonValueKind.Array)
+            return value.EnumerateArray().Any(item => CallsAgent(item, surface));
+        if (value.ValueKind != JsonValueKind.Object)
+            return false;
+
+        if (value.TryGetProperty("@call", out var name) && name.ValueKind == JsonValueKind.String &&
+            !name.GetString()!.StartsWith('@'))
+        {
+            var named = value.TryGetProperty("catalogId", out var catalogId);
+            if ((!named || catalogId.ValueKind == JsonValueKind.String) &&
+                _functions.Classify(surface.Id, surface.CatalogId, named ? catalogId.GetString() : null, name.GetString()!,
+                    userInitiated: false, out _, out _, out _) == CallRoute.Agent)
+                return true;
+        }
+        foreach (var member in value.EnumerateObject())
+            if (CallsAgent(member.Value, surface))
+                return true;
+        return false;
     }
 
     private JsonElement? ResolveAccessibility(ComponentOccurrence occurrence, SurfaceSnapshot surface, bool ancestorHidden)
@@ -453,12 +668,13 @@ public sealed class NodeResolver : IDisposable
     }
 
     // A rule's condition is a path or a function call that yields a boolean or a validation result object.
-    private IReadOnlyList<CheckResult> ResolveChecks(ComponentOccurrence occurrence, SurfaceSnapshot surface)
+    private IReadOnlyList<CheckResult> ResolveChecks(ComponentOccurrence occurrence, NodeScope scope)
     {
         if ((!occurrence.Definition.TryGetProperty("@checks", out var rules) &&
              !occurrence.Definition.TryGetProperty("checks", out rules)) || rules.ValueKind != JsonValueKind.Array)
             return [];
 
+        var surface = scope.Surface;
         var results = new List<CheckResult>();
         foreach (var rule in rules.EnumerateArray())
         {
@@ -474,6 +690,11 @@ public sealed class NodeResolver : IDisposable
                 pointer.ValueKind == JsonValueKind.String)
                 resolved = surface.TryGetScopedData(occurrence.DataPath, pointer.GetString()!, out value) &&
                     value.ValueKind != JsonValueKind.Null;
+            else if (Route(scope, "@checks/" + results.Count.ToString(CultureInfo.InvariantCulture), condition) is { } routed)
+            {
+                results.Add(routed.AsCheck(results.Count, message));
+                continue;
+            }
             else
                 resolved = _functions.TryEvaluate(surface, occurrence.DataPath, condition, userInitiated: false,
                     out value, out _);
@@ -551,7 +772,7 @@ public sealed class NodeResolver : IDisposable
     private static JsonElement BooleanElement(bool value) => value ? TrueValue : FalseValue;
 
     private static string Signature(IReadOnlyDictionary<string, ResolvedProperty> properties,
-        IReadOnlyList<CheckResult> checks, IReadOnlyList<ComponentOccurrence> children)
+        IReadOnlyList<CheckResult> checks, IReadOnlyList<string> childInstanceIds)
     {
         var builder = new StringBuilder();
         foreach (var check in checks)
@@ -564,8 +785,58 @@ public sealed class NodeResolver : IDisposable
                 .Append(property.Value is { } value ? value.GetRawText() : "\u0000").Append('|')
                 .Append(string.Join(",", property.ChildPositions)).Append(';');
         }
-        foreach (var child in children)
-            builder.Append(child.InstanceId.Length).Append(':').Append(child.InstanceId);
+        foreach (var child in childInstanceIds)
+            builder.Append(child.Length).Append(':').Append(child);
         return builder.ToString();
+    }
+
+    private sealed record NodeScope(SurfaceSnapshot Surface, string InstanceId, string DataPath,
+        Dictionary<string, BoundExpression>? Previous, Dictionary<string, BoundExpression> Next);
+
+    // A property or check condition of one node that waits for the agent through a router binding.
+    private sealed class BoundExpression(FunctionBinding binding, string expression, string dataPath)
+    {
+        public FunctionBinding Binding { get; } = binding;
+        public string Expression { get; } = expression;
+        public string DataPath { get; } = dataPath;
+        public string? Property { get; private set; }
+        public ResolvedPropertyKind Kind { get; private set; }
+        public bool CoerceBoolean { get; private set; }
+        public int CheckIndex { get; private set; }
+        public string? Message { get; private set; }
+
+        public ResolvedProperty AsProperty(string name, ResolvedPropertyKind kind, bool coerceBoolean)
+        {
+            Property = name;
+            Kind = kind;
+            CoerceBoolean = coerceBoolean;
+            return ToProperty();
+        }
+
+        public CheckResult AsCheck(int index, string? message)
+        {
+            Property = null;
+            CheckIndex = index;
+            Message = message;
+            return ToCheck();
+        }
+
+        // A pending or failed call leaves the property without a value, like a path with no data.
+        public ResolvedProperty ToProperty()
+        {
+            JsonElement? value = Binding.IsPending || Binding.HasFailed ? null : Binding.Value;
+            return Kind == ResolvedPropertyKind.Binding
+                ? NodeResolver.Binding(value, CoerceBoolean, writable: false, null)
+                : new(ResolvedPropertyKind.Value, value, false, null, []);
+        }
+
+        public CheckResult ToCheck()
+        {
+            if (Binding.IsPending)
+                return new(CheckState.Pending, null);
+            if (Binding.HasFailed)
+                return new(CheckState.Invalid, new ValidationResult(false, null, Message, "error"));
+            return Evaluate(Binding.Value, Message);
+        }
     }
 }

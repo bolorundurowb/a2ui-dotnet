@@ -96,6 +96,9 @@ internal static class CoreSmoke
         CheckFunctions(registry);
         CheckOutbound(registry);
         CheckRpc(registry);
+        CheckMountedAgentCalls();
+        CheckMountedDisposalOrder();
+        CheckMountedConcurrentReplies();
 
         session.TryGetSurface("form", out var beforeCancellation);
         var cancelled = new CancellationToken(canceled: true);
@@ -785,6 +788,281 @@ internal static class CoreSmoke
         Require(timedOut);
         Require(!timing.TryHandleResponse(Decode(Answer("late", "\"value\":1"))));
     }
+
+    // A catalog with a function that has no implementation, so the renderer sends its calls to the agent.
+    private const string RemoteCatalog = """
+        {"catalogId":"test:remote","protocolVersion":"1.0","components":{},"functions":{
+          "lookup":{"type":"object","returnType":"any",
+            "properties":{"@call":{"const":"lookup"},"args":{"type":"object"}},"required":["@call","args"]}}}
+        """;
+
+    private static CatalogRegistry RemoteRegistry()
+    {
+        var registry = new CatalogRegistry();
+        Require(registry.TryRegister(Encoding.UTF8.GetBytes(RemoteCatalog), out var problem), problem);
+        return registry;
+    }
+
+    private static string Lookup(string args) => """{"@call":"lookup","catalogId":"test:remote","args":""" + args + "}";
+
+    private static WireMessage AgentValue(WireMessage call, string value) => AgentAnswer(call, "\"value\":" + value);
+
+    private static WireMessage AgentFailure(WireMessage call, string message) =>
+        AgentAnswer(call, "\"error\":{\"code\":\"EXECUTION_ERROR\",\"message\":" + Quote(message) + "}");
+
+    private static WireMessage AgentAnswer(WireMessage call, string body) => Decode(
+        """{"version":"1.0","agentFunctionResponse":{"functionCallId":""" +
+        Quote(call.Payload.GetProperty("functionCallId").GetString()!) + "," + body + "}}");
+
+    private static string Arguments(WireMessage call) => call.Payload.GetProperty("callFunction").GetProperty("args").GetRawText();
+
+    private static WireMessage Create(string surfaceId, string dataModel, string components) => Decode(
+        """{"version":"1.0","createSurface":{"surfaceId":""" + Quote(surfaceId) + ",\"catalogId\":" +
+        Quote(CatalogRegistry.BasicCatalogId) + ",\"dataModel\":" + dataModel + ",\"components\":" + components + "}}");
+
+    private static WireMessage UpdateComponents(string surfaceId, string components) => Decode(
+        """{"version":"1.0","updateComponents":{"surfaceId":""" + Quote(surfaceId) + ",\"components\":" + components + "}}");
+
+    private static string Quote(string text) => System.Text.Json.Nodes.JsonValue.Create(text)!.ToJsonString();
+
+    private static void CheckMountedAgentCalls()
+    {
+        var registry = RemoteRegistry();
+        using var session = new SurfaceSession(registry);
+        var sent = new List<WireMessage>();
+        var errors = new List<RendererError>();
+        using var client = new AgentFunctionClient(sent.Add);
+        using var router = new FunctionCallRouter(session, registry, new FunctionEvaluator(registry), client);
+        router.ErrorReported += errors.Add;
+        using var resolver = new NodeResolver(session, registry, "form", router);
+        var changed = new List<string>();
+        resolver.PropsChanged += node => changed.Add(node.ComponentId);
+        ResolvedNode Node(string id, int occurrence = 0) => resolver.Nodes.Where(node => node.ComponentId == id).ElementAt(occurrence);
+        WireMessage Sent(string args) => sent.Last(call => Arguments(call) == args);
+
+        Require(session.Apply(Create("form", """{"user":"ada","items":[{"id":"a"},{"id":"b"}]}""",
+            """[{"id":"root","component":"Column","children":["greeting","name","list"]},""" +
+            """{"id":"greeting","component":"Text","text":""" + Lookup("""{"user":{"@path":"/user"}}""") + "}," +
+            """{"id":"name","component":"TextField","label":"Name","value":{"@path":"/user"},"@checks":[{"condition":""" +
+            Lookup("""{"check":{"@path":"/user"}}""") + ""","message":"Taken"}]},""" +
+            """{"id":"list","component":"Column","children":{"componentId":"item","path":"/items"}},""" +
+            """{"id":"item","component":"Text","text":""" + Lookup("""{"id":{"@path":"id"}}""") + "}]")) is null);
+
+        // Every agent call is sent at mount. Properties wait without a value and pending checks do not block.
+        Require(sent.Count == 4 && client.PendingCount == 4);
+        var greeting = Node("greeting");
+        var name = Node("name");
+        Require(greeting.Props["text"].Value is null && greeting.Props["text"].Kind == ResolvedPropertyKind.Binding);
+        Require(name.Checks.Single().State == CheckState.Pending && name.IsValid && changed.Count == 0);
+
+        // Answers update only the node that waited, once.
+        Require(router.ReceiveResponse(AgentValue(Sent("""{"user":"ada"}"""), "\"Hello Ada\"")));
+        Require(greeting.Props["text"].Value?.GetString() == "Hello Ada" && changed.SequenceEqual(["greeting"]));
+        Require(router.ReceiveResponse(AgentValue(Sent("""{"check":"ada"}"""), """{"valid":false,"message":"In use"}""")));
+        Require(name.Checks[0].State == CheckState.Invalid && !name.IsValid && name.ValidationErrors.Single() == "Taken");
+        Require(changed.SequenceEqual(["greeting", "name"]) && errors.Count == 0);
+
+        // A data change sends the calls whose arguments changed. A failed call leaves the value empty and the check invalid.
+        Require(session.WriteData("form", "/user", Json("\"lin\"")) is null && sent.Count == 6);
+        Require(greeting.Props["text"].Value is null && name.Checks[0].State == CheckState.Pending && name.IsValid);
+        var failed = Sent("""{"user":"lin"}""");
+        Require(router.ReceiveResponse(AgentFailure(failed, "Offline")));
+        Require(greeting.Props["text"].Value is null && errors.Count == 1 && errors[0].Code == "EXPRESSION_ERROR" &&
+            errors[0].FunctionCallId == failed.Payload.GetProperty("functionCallId").GetString());
+        Require(router.ReceiveResponse(AgentValue(Sent("""{"check":"lin"}"""), "true")));
+        Require(name.Checks[0].State == CheckState.Valid && name.IsValid);
+
+        // Detaching a node cancels its pending call. Its late answer is dropped and raises nothing.
+        var second = Node("item", 1);
+        var secondCall = Sent("""{"id":"b"}""");
+        var pending = client.PendingCount;
+        Require(session.WriteData("form", "/items", Json("""[{"id":"a"}]""")) is null);
+        Require(!resolver.Nodes.Contains(second) && client.PendingCount == pending - 1);
+        var before = changed.Count;
+        Require(!router.ReceiveResponse(AgentValue(secondCall, "\"late\"")) && changed.Count == before);
+        Require(Node("item").Props["text"].Value is null && errors.Count == 1);
+
+        // A component update that detaches a subtree cancels the calls of every detached node.
+        var firstCall = Sent("""{"id":"a"}""");
+        Require(session.Apply(UpdateComponents("form", """[{"id":"root","component":"Column","children":["greeting","name"]}]""")) is null);
+        Require(client.PendingCount == 0 && !router.ReceiveResponse(AgentValue(firstCall, "\"late\"")));
+
+        // Two nodes share one call. Detaching one keeps the call for the other, and a later node reads the cached answer.
+        var sharedLookup = Lookup("""{"key":"same"}""");
+        Require(session.Apply(UpdateComponents("form",
+            """[{"id":"root","component":"Column","children":["greeting","name","first","second"]},""" +
+            """{"id":"first","component":"Text","text":""" + sharedLookup + "}," +
+            """{"id":"second","component":"Text","text":""" + sharedLookup + "}]")) is null);
+        var shared = sent[^1];
+        Require(Arguments(shared) == """{"key":"same"}""" && client.PendingCount == 1);
+        Require(session.Apply(UpdateComponents("form", """[{"id":"root","component":"Column","children":["greeting","name","first"]}]""")) is null);
+        Require(client.PendingCount == 1 && router.ReceiveResponse(AgentValue(shared, "\"kept\"")));
+        Require(Node("first").Props["text"].Value?.GetString() == "kept");
+        var sentBefore = sent.Count;
+        Require(session.Apply(UpdateComponents("form", """[{"id":"root","component":"Column","children":["greeting","name","first","second"]}]""")) is null);
+        Require(Node("second").Props["text"].Value?.GetString() == "kept" && sent.Count == sentBefore);
+
+        // Deleting the surface cancels pending calls without an error, and their late answers are dropped.
+        Require(session.Apply(UpdateComponents("form",
+            """[{"id":"third","component":"Text","text":""" + Lookup("""{"key":"third"}""") + "}," +
+            """{"id":"root","component":"Column","children":["greeting","name","third"]}]""")) is null);
+        var third = sent[^1];
+        Require(client.PendingCount == 1);
+        Require(session.Apply(Decode("""{"version":"1.0","deleteSurface":{"surfaceId":"form"}}""")) is null);
+        Require(client.PendingCount == 0 && resolver.Nodes.Count == 0 && errors.Count == 1);
+        Require(!router.ReceiveResponse(AgentValue(third, "\"late\"")));
+
+        // Mounted actions run through the router and can wait for the agent.
+        Require(session.Apply(Create("actions", "{}",
+            """[{"id":"root","component":"Column","children":["save"]},""" +
+            """{"id":"save","component":"Button","child":"label","action":{"event":{"name":"save","context":{"quote":""" +
+            Lookup("""{"item":"x"}""") + "}}}}," +
+            """{"id":"label","component":"Text","text":"Save"}]""")) is null);
+        using var actions = new NodeResolver(session, registry, "actions", router);
+        var dispatched = new List<WireMessage>();
+        router.ActionDispatched += dispatched.Add;
+        var save = actions.Nodes.Single(node => node.ComponentId == "save");
+        Require(actions.RouteAction(save, "action") is null && dispatched.Count == 0);
+        Require(router.ReceiveResponse(AgentValue(sent[^1], "12")));
+        Require(dispatched.Single().Payload.GetProperty("context").GetProperty("quote").GetInt32() == 12 &&
+            dispatched[0].Payload.GetProperty("sourceComponentId").GetString() == "save");
+        var label = actions.Nodes.Single(node => node.ComponentId == "label");
+        Require(actions.RouteFunctionAction(label, "text", _ => { })?.Code == "INVALID_ACTION");
+
+        using var local = new NodeResolver(session, registry, "actions");
+        var refused = false;
+        try
+        {
+            local.RouteAction(local.Nodes[0], "action");
+        }
+        catch (InvalidOperationException)
+        {
+            refused = true;
+        }
+        Require(refused);
+        using var otherSession = new SurfaceSession(registry);
+        var mismatch = false;
+        try
+        {
+            using var wrong = new NodeResolver(otherSession, registry, "actions", router);
+        }
+        catch (ArgumentException)
+        {
+            mismatch = true;
+        }
+        Require(mismatch);
+
+        // An in-process agent can answer inside the send callback. The node resolves at mount.
+        FunctionCallRouter? inline = null;
+        using var inlineSession = new SurfaceSession(registry);
+        using var inlineClient = new AgentFunctionClient(call => inline!.ReceiveResponse(
+            Arguments(call).Contains("fail", StringComparison.Ordinal) ? AgentFailure(call, "No") : AgentValue(call, "\"now\"")));
+        inline = new FunctionCallRouter(inlineSession, registry, new FunctionEvaluator(registry), inlineClient);
+        using (inline)
+        using (var inlineNodes = new NodeResolver(inlineSession, registry, "inline", inline))
+        {
+            Require(inlineSession.Apply(Create("inline", "{}",
+                """[{"id":"root","component":"TextField","label":"Now","value":""" + Lookup("""{"when":"now"}""") +
+                ""","@checks":[{"condition":""" + Lookup("""{"when":"fail"}""") + ""","message":"Failed"}]}]""")) is null);
+            var field = inlineNodes.Nodes.Single();
+            Require(field.Props["value"].Value?.GetString() == "now" && field.Checks[0].State == CheckState.Invalid &&
+                inlineClient.PendingCount == 0);
+        }
+    }
+
+    private static void CheckMountedDisposalOrder()
+    {
+        var registry = RemoteRegistry();
+        var components = """[{"id":"root","component":"TextField","label":"Name","value":""" + Lookup("""{"field":"value"}""") +
+            ""","@checks":[{"condition":""" + Lookup("""{"field":"check"}""") + ""","message":"Bad"}]}]""";
+
+        // Disposing the resolver first cancels its calls. The router keeps working for other bindings.
+        using (var session = new SurfaceSession(registry))
+        {
+            var sent = new List<WireMessage>();
+            using var client = new AgentFunctionClient(sent.Add);
+            using var router = new FunctionCallRouter(session, registry, new FunctionEvaluator(registry), client);
+            var resolver = new NodeResolver(session, registry, "order", router);
+            var changes = 0;
+            resolver.PropsChanged += _ => changes++;
+            Require(session.Apply(Create("order", "{}", components)) is null && client.PendingCount == 2);
+            resolver.Dispose();
+            Require(client.PendingCount == 0 && resolver.Nodes.Count == 0);
+            Require(sent.All(call => !router.ReceiveResponse(AgentValue(call, "true"))) && changes == 0);
+            using var binding = router.Bind("order", "/", Json(Lookup("""{"field":"value"}""")));
+            Require(binding.IsPending && client.PendingCount == 1);
+            resolver.Dispose();
+        }
+
+        // Disposing the router first cancels its calls. The resolver keeps refreshing and resolves those calls locally.
+        using (var session = new SurfaceSession(registry))
+        {
+            var sent = new List<WireMessage>();
+            using var client = new AgentFunctionClient(sent.Add);
+            var router = new FunctionCallRouter(session, registry, new FunctionEvaluator(registry), client);
+            using var resolver = new NodeResolver(session, registry, "order", router);
+            Require(session.Apply(Create("order", """{"n":1}""", components)) is null && client.PendingCount == 2);
+            router.Dispose();
+            Require(client.PendingCount == 0);
+            Require(session.WriteData("order", "/n", Json("2")) is null);
+            var field = resolver.Nodes.Single();
+            Require(field.Props["value"].Value is null && field.Checks[0].State == CheckState.Unresolved && field.IsValid);
+            Require(sent.All(call => !client.TryHandleResponse(AgentValue(call, "true"))));
+        }
+    }
+
+    // Hosts may receive answers on worker threads. They serialise each answer with the session, as for any other call.
+    private static void CheckMountedConcurrentReplies()
+    {
+        var registry = RemoteRegistry();
+        using var session = new SurfaceSession(registry);
+        var sent = new List<WireMessage>();
+        using var client = new AgentFunctionClient(sent.Add);
+        using var router = new FunctionCallRouter(session, registry, new FunctionEvaluator(registry), client);
+        using var resolver = new NodeResolver(session, registry, "load", router);
+        var gate = new object();
+        var violations = 0;
+        resolver.PropsChanged += node =>
+        {
+            if (!Monitor.IsEntered(gate) || !resolver.Nodes.Contains(node))
+                Interlocked.Increment(ref violations);
+        };
+
+        const int count = 40;
+        string Items(IEnumerable<int> ids) => "[" + string.Join(",", ids.Select(id => "{\"id\":" + id + "}")) + "]";
+        lock (gate)
+            Require(session.Apply(Create("load", "{\"items\":" + Items(Enumerable.Range(0, count)) + "}",
+                """[{"id":"root","component":"Column","children":{"componentId":"item","path":"/items"}},""" +
+                """{"id":"item","component":"Text","text":""" + Lookup("""{"id":{"@path":"id"}}""") + "}]")) is null);
+        var calls = sent.ToArray();
+        Require(calls.Length == count);
+
+        // Removing the odd items moves the even items, so their nodes rebind while answers arrive on other threads.
+        var replies = Task.Run(() => Parallel.ForEach(calls, new ParallelOptions { MaxDegreeOfParallelism = 4 }, call =>
+        {
+            var id = Json(Arguments(call)).GetProperty("id").GetInt32();
+            lock (gate)
+                router.ReceiveResponse(AgentValue(call, Quote("item-" + id)));
+        }));
+        lock (gate)
+            Require(session.WriteData("load", "/items", Json(Items(Enumerable.Range(0, count).Where(id => id % 2 == 0)))) is null);
+        Require(replies.Wait(TimeSpan.FromSeconds(30)));
+
+        lock (gate)
+        {
+            var mounted = resolver.Nodes.Where(node => node.ComponentId == "item").ToArray();
+            Require(mounted.Length == count / 2 && client.PendingCount == 0 && violations == 0);
+            for (var index = 0; index < mounted.Length; index++)
+                Require(mounted[index].Props["text"].Value?.GetString() == $"item-{index * 2}");
+        }
+    }
+
+    private static JsonElement Json(string text)
+    {
+        using var document = JsonDocument.Parse(text);
+        return document.RootElement.Clone();
+    }
+
     private static void CheckOccurrences(CatalogRegistry registry)
     {
         using var session = new SurfaceSession(registry);
