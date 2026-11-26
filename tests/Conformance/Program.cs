@@ -68,6 +68,7 @@ foreach (var suite in new[] { "core", "agent" })
                     "The fixture pairs requiresUserActivation with rendererOrAgent. The pinned catalog schema only allows this requirement on rendererOnly functions.",
                 _ when !scaling && path == RendererFunctionCases.Path => null,
                 _ when !scaling && path == AgentFunctionCases.Path => null,
+                _ when !scaling && path == DataModelCases.Path => null,
                 _ when !scaling && AgentCases.Supports(path, test) => null,
                 (_, _, "conformance/agent/direct_json/response_streaming.yaml") when test.GetProperty("args").GetRawText()
                     .Contains("catalog_v0_", StringComparison.Ordinal) => "Legacy protocol is outside the profile.",
@@ -112,6 +113,8 @@ foreach (var suite in new[] { "core", "agent" })
                         RendererFunctionCases.Run(test);
                     else if (path == AgentFunctionCases.Path)
                         AgentFunctionCases.Run(test, assets);
+                    else if (path == DataModelCases.Path)
+                        DataModelCases.Run(test);
                     else if (suite == "agent")
                         AgentCases.Run(test, assets);
                     else if (OutboundCases.Handles(path))

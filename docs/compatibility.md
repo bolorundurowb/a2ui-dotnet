@@ -77,7 +77,7 @@ The Direct JSON streaming parser reads the block again on each chunk and applies
 
 Nested template items retain identity through insertion, reordering and removal by matching their JSON values, in list order for duplicates. For unmatched values, an unmatched occurrence at the same index survives an in-place edit. Moved nodes receive updated positions and scopes in the same notification batch. Hosts should treat occurrence IDs as opaque. Core continues to store the original wire values and unescapes doubled `@@` keys when resolving component properties.
 
-On .NET 8.0.34 for Windows x64, the Release conformance run passed 531 Core and 360 Agent cases, with 334 Core and 670 Agent exclusions and no failures. The pinned revision is `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe`.
+On .NET 8.0.34 for Windows x64, the Release conformance run passed 583 Core and 360 Agent cases, with 282 Core and 670 Agent exclusions and no failures. The pinned revision is `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe`.
 
 | Pinned suite | Passed | Exclusions and adaptations |
 | --- | ---: | --- |
@@ -85,6 +85,9 @@ On .NET 8.0.34 for Windows x64, the Release conformance run passed 531 Core and 
 | `node_resolution.yaml` | 7 | Three metadata cases use an in-memory translation of bare `metadata` to the pinned wire spelling `@metadata`. 24 cases require the legacy Basic Catalog and one dispatch-metadata case uses a bare envelope key. |
 | `reserved_keys.yaml` | 10 | Both doubled-`@@` evaluation cases assert resolved properties through `NodeResolver`. |
 | `accessibility.yaml` | 5 | The adapter checks explicit attributes. Implied names, platform roles and interactive states, and axe-core checks belong to a renderer adapter. The transitional bare `accessibility` case disagrees with the pinned schema and is excluded. |
+| `data_model.yaml` | 52 | All cases run through `DataModel`. The cases declare a `v0.9` catalog, but the data model rules do not depend on the wire version. The upstream harness cannot tell null from a missing value, so the sparse list padding case accepts the null left in the gap as absent. `mutate_input` mutates a JSON tree that is parsed into a document, which the test disposes after the write. |
+
+`DataModel` stores a JSON value and offers `Get`, `Set`, `Delete` and `Observe`. It reports invalid, forbidden and refused paths as `A2uiDiagnostic` values that map to the `DataError` category, and a refused write changes nothing. It collapses repeated and trailing slashes, which the wire `updateDataModel` path does not. An observer receives the new value when a write at its path, an ancestor or a descendant changes that value. It does not receive a write to an unrelated or prefix-sibling path, or a write that leaves the value equal. `DataModel.Dispose` detaches all observers but leaves the data readable and writable. Writes through `updateDataModel` share the same list rules. A write past the end of a list pads it with null up to index 10,000 and rejects a higher index with `invalidDataPath`. Deleting a path that holds no value does nothing, where it was previously rejected, and a write replaces an explicit null with a container.
 
 [Core blueprint](https://github.com/a2ui-project/a2ui/blob/d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe/blueprints/modules/a2ui_core.blueprint.md) · [Pinned Core fixtures](https://github.com/a2ui-project/a2ui/tree/d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe/conformance/core)
 
