@@ -13,6 +13,7 @@ internal static class CoreSmoke
         CheckSessionDisposal(registry);
         CheckCatalogValidation();
         CheckCandidateGraph();
+        CheckProgressiveLeafComposition();
         var custom = """
             {
               "catalogId":"test:cards","protocolVersion":"1.0",
@@ -197,6 +198,41 @@ internal static class CoreSmoke
         Require(rejection?.Code == "indexOutsideCollection", rejection);
         Require(session.TryGetSurface("graph", out var after) && ReferenceEquals(before, after) &&
             !after!.Components.ContainsKey("list") && notifications == 2);
+    }
+
+    private static void CheckProgressiveLeafComposition()
+    {
+        var registry = new CatalogRegistry();
+        const string definition = """
+            {"catalogId":"test:composition","protocolVersion":"1.0","components":{
+              "Container":{"type":"object","properties":{"child":{"$ref":"common_types.json#/$defs/Child"}},
+                "allowedChildren":["Label"]},
+              "Label":{"type":"object","allowedParents":["Container"]},
+              "Other":{"type":"object"}}}
+            """;
+        Require(registry.TryRegister(Encoding.UTF8.GetBytes(definition), out var registration), registration);
+        using var session = new SurfaceSession(registry);
+        Require(session.Apply(Decode("""
+            {"version":"1.0","createSurface":{"surfaceId":"leaf","catalogId":"test:composition",
+              "components":[{"id":"root","component":"Container","child":"label"}]}}
+            """)) is null);
+        Require(session.TryGetSurface("leaf", out var before));
+
+        using var fork = session.Fork();
+        var rejection = fork.Apply(Decode("""
+            {"version":"1.0","updateComponents":{"surfaceId":"leaf","components":[
+              {"id":"label","component":"Other"}]}}
+            """));
+        Require(rejection?.Code == "unallowedChild", rejection);
+        Require(fork.TryGetSurface("leaf", out var rejected) && ReferenceEquals(before, rejected));
+
+        Require(fork.Apply(Decode("""
+            {"version":"1.0","updateComponents":{"surfaceId":"leaf","components":[
+              {"id":"label","component":"Label"}]}}
+            """)) is null);
+        Require(fork.TryGetSurface("leaf", out var after) && after!.Components.ContainsKey("label"));
+        Require(session.TryGetSurface("leaf", out var original) && ReferenceEquals(before, original) &&
+            !original!.Components.ContainsKey("label"));
     }
 
     private static void CheckSessionDisposal(CatalogRegistry registry)
