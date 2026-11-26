@@ -1,9 +1,15 @@
 using System.Text.Json;
 using YamlDotNet.Serialization;
 
+if (args.Length == 3 && args[2] == "--express-peer")
+{
+    ExpressCases.ExportGoldenCorpus(Path.GetFullPath(args[0]), args[1]);
+    return 0;
+}
+
 if (args.Length is < 2 or > 3 || (args.Length == 3 && args[2] != "--scaling"))
 {
-    Console.Error.WriteLine("Usage: Conformance <pinned-assets> <results.json> [--scaling]");
+    Console.Error.WriteLine("Usage: Conformance <pinned-assets> <results.json> [--scaling | --express-peer]");
     return 2;
 }
 
