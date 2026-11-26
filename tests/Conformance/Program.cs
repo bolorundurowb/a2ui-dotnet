@@ -32,7 +32,8 @@ foreach (var suite in new[] { "core", "agent" })
         {
             var id = ReadString(test, "name") ?? ReadString(test, "id")
                 ?? throw new InvalidDataException($"Unnamed scenario in {path}.");
-            var version = ReadString(test, "protocolVersion") ?? ReadString(test, "version")
+            var version = path == MacroCases.Path ? MacroCases.Version(test)
+                : ReadString(test, "protocolVersion") ?? ReadString(test, "version")
                 ?? ReadString(document, "protocolVersion") ?? ReadString(document, "version");
             var runScaling = scaling && path == "conformance/core/message_processor_scaling.yaml" &&
                 id is "test_scaling_process_single_component_messages_relaxed_v10" or "test_scaling_process_single_component_messages_composition_v10";
@@ -41,6 +42,8 @@ foreach (var suite in new[] { "core", "agent" })
             string? reason = (isScaling != scaling, version, path) switch
             {
                 (true, _, _) => "Run mode excludes this case.",
+                (_, _, MacroCases.Path) when MacroCases.IsLegacy(test) =>
+                    "The case uses a v0.9 envelope. The suite defaults to v0.9 unless envelope_version names 1.0, and v0.9 is outside the profile.",
                 (_, "v0.8" or "v0.9" or "v0.9.1" or "0.8" or "0.9" or "0.9.1", _) => "Legacy protocol is outside the profile.",
                 (_, _, _) when path.StartsWith("conformance/agent/legacy/", StringComparison.Ordinal) => "Legacy protocol is outside the profile.",
                 (_, _, "conformance/core/adapter_conformance.yaml") => "Renderer adapter is outside the headless profile.",
@@ -69,6 +72,9 @@ foreach (var suite in new[] { "core", "agent" })
                 _ when !scaling && path == RendererFunctionCases.Path => null,
                 _ when !scaling && path == AgentFunctionCases.Path => null,
                 _ when !scaling && path == DataModelCases.Path => null,
+                (_, _, MacroCases.Path) when id == "36_surface_lifecycle_delete_recreate_and_null_catalog_id" =>
+                    "The case sends \"@catalogId\": null. The pinned message schema requires a string and Core rejects the null when it decodes the message, so the expander never sees it.",
+                _ when !scaling && path == MacroCases.Path => null,
                 _ when !scaling && AgentCases.Supports(path, test) => null,
                 (_, _, "conformance/agent/direct_json/response_streaming.yaml") when test.GetProperty("args").GetRawText()
                     .Contains("catalog_v0_", StringComparison.Ordinal) => "Legacy protocol is outside the profile.",
@@ -115,6 +121,8 @@ foreach (var suite in new[] { "core", "agent" })
                         AgentFunctionCases.Run(test, assets);
                     else if (path == DataModelCases.Path)
                         DataModelCases.Run(test);
+                    else if (path == MacroCases.Path)
+                        MacroCases.Run(test, document, assets);
                     else if (suite == "agent")
                         AgentCases.Run(test, assets);
                     else if (OutboundCases.Handles(path))
