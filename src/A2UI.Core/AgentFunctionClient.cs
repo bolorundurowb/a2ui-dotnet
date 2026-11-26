@@ -209,6 +209,8 @@ public sealed class AgentFunctionClient : IDisposable
         return ids.Count(id => Complete(id, Failure("CANCELLED", "The call was cancelled.")));
     }
 
+    internal bool Cancel(string functionCallId) => Complete(functionCallId, Failure("CANCELLED", "The call was cancelled."));
+
     /// <summary>Cancels every pending call with <c>CANCELLED</c> and rejects later calls with <c>DISPOSED</c>.</summary>
     public void Dispose()
     {

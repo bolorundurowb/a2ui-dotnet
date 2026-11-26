@@ -223,12 +223,20 @@ internal static class RpcCases
 
     // ---- reactive bindings routed to the agent ----
 
+    // Each scenario runs twice: once through a router binding, and once through the mounted nodes of a NodeResolver.
     private static void RunUiBinding(JsonElement test, JsonElement scenario)
+    {
+        RunUiBinding(test, scenario, mounted: false);
+        RunUiBinding(test, scenario, mounted: true);
+    }
+
+    private static void RunUiBinding(JsonElement test, JsonElement scenario, bool mounted)
     {
         var surfaceId = scenario.GetProperty("surfaceId").GetString()!;
         var catalogId = scenario.GetProperty("catalogId").GetString()!;
+        var components = scenario.TryGetProperty("components", out var many) ? many.EnumerateArray().ToArray() : [scenario.GetProperty("component")];
         var registry = new CatalogRegistry(includeBasicCatalog: false);
-        Register(registry, catalogId, new JsonObject());
+        Register(registry, catalogId, mounted ? RemoteDeclarations(components, []) : new JsonObject(), mounted);
         using var session = new SurfaceSession(registry);
         Apply(session, new JsonObject
         {
@@ -242,19 +250,42 @@ internal static class RpcCases
         using var router = new FunctionCallRouter(session, registry, new FunctionEvaluator(registry), client);
         router.ErrorReported += errors.Add;
 
-        // A property that holds a function call is bound the way a mounted component would bind it.
-        var components = scenario.TryGetProperty("components", out var many) ? many.EnumerateArray().ToArray() : [scenario.GetProperty("component")];
         var observed = scenario.TryGetProperty("observe", out var watch) ? watch.GetProperty("componentId").GetString() : components[0].GetProperty("id").GetString();
         var observedComponent = components.First(component => component.GetProperty("id").GetString() == observed);
         var isCheck = observedComponent.TryGetProperty("checks", out var checks);
-        var expression = isCheck
-            ? checks.EnumerateArray().First().GetProperty("condition")
-            : observedComponent.GetProperty(scenario.TryGetProperty("observe", out var property) ? property.GetProperty("property").GetString()! : "text");
-        using var binding = router.Bind(surfaceId, "/", expression);
+        var propertyName = scenario.TryGetProperty("observe", out var property) ? property.GetProperty("property").GetString()! : "text";
+        var expression = isCheck ? checks.EnumerateArray().First().GetProperty("condition") : observedComponent.GetProperty(propertyName);
+
+        using var resolver = mounted ? new NodeResolver(session, registry, surfaceId, router) : null;
+        using var binding = mounted ? null : router.Bind(surfaceId, "/", expression);
+        var changed = new List<ResolvedNode>();
+        ResolvedNode? node = null;
+        if (resolver is not null)
+        {
+            resolver.PropsChanged += changed.Add;
+            // The fixture spells check rules as bare checks. The pinned 1.0 schema declares them as @checks.
+            var mountedComponents = new JsonArray();
+            foreach (var component in components)
+            {
+                var copy = JsonNode.Parse(component.GetRawText())!.AsObject();
+                if (copy.Remove("checks", out var rules))
+                    copy["@checks"] = rules;
+                mountedComponents.Add(copy);
+            }
+            Apply(session, new JsonObject
+            {
+                ["version"] = "1.0",
+                ["updateComponents"] = new JsonObject { ["surfaceId"] = surfaceId, ["components"] = mountedComponents }
+            });
+            node = Mounted(resolver, observed!);
+            if (isCheck)
+                Require(node.Checks[0].State == CheckState.Pending && node.IsValid, "The pending check is not pending.");
+        }
+        JsonElement Value() => node is null ? binding!.Value : node.Props[propertyName].Value ?? Parse("null");
 
         var expectation = test.GetProperty("expect");
         if (expectation.TryGetProperty("initialValue", out var initial))
-            Require(NodeCases.JsonEquals(binding.Value, initial), "The initial value differs.");
+            Require(NodeCases.JsonEquals(Value(), initial), "The initial value differs.");
         Require(sent.Count == 1, $"Expected one outbound call but {sent.Count} were sent.");
         var outbound = sent[0].Payload;
         var expectedCall = expectation.GetProperty("outboundCall").GetProperty("callAgentFunction");
@@ -271,19 +302,39 @@ internal static class RpcCases
             WireDirection.AgentToRenderer)), "The response matched no call.");
 
         if (expectation.TryGetProperty("resolvedValue", out var resolved))
-            Require(NodeCases.JsonEquals(binding.Value, resolved), $"The resolved value differs: {binding.Value.GetRawText()}");
+        {
+            Require(NodeCases.JsonEquals(Value(), resolved), $"The resolved value differs: {Value().GetRawText()}");
+            if (node is not null && resolved.ValueKind != JsonValueKind.Null)
+                Require(changed.Contains(node), "The node did not report the settled value.");
+        }
         if (expectation.TryGetProperty("validationResult", out var validation))
         {
-            Require(!binding.Passes == !validation.GetProperty("valid").GetBoolean(), "The check result differs.");
-            Require(validation.GetProperty("message").GetString() == checks.EnumerateArray().First().GetProperty("message").GetString(),
-                "The check message differs.");
+            var valid = validation.GetProperty("valid").GetBoolean();
+            var message = validation.GetProperty("message").GetString();
+            if (node is null)
+            {
+                Require(binding!.Passes == valid, "The check result differs.");
+                Require(message == checks.EnumerateArray().First().GetProperty("message").GetString(), "The check message differs.");
+            }
+            else
+            {
+                var check = node.Checks[0];
+                Require(check.State == (valid ? CheckState.Valid : CheckState.Invalid) && node.IsValid == valid &&
+                    changed.Contains(node), $"The check state {check.State} differs.");
+                Require(valid || check.Result!.Message == message && check.Result.Severity == validation.GetProperty("severity").GetString(),
+                    "The check result differs.");
+            }
         }
         if (expectation.TryGetProperty("siblings", out var siblings))
             foreach (var sibling in siblings.EnumerateObject())
             {
-                var component = components.First(item => item.GetProperty("id").GetString() == sibling.Name);
-                Require(NodeCases.JsonEquals(component.GetProperty("text"), sibling.Value.GetProperty("text")), "A sibling differs.");
+                var text = resolver is null
+                    ? components.First(item => item.GetProperty("id").GetString() == sibling.Name).GetProperty("text")
+                    : Mounted(resolver, sibling.Name).Props["text"].Value ?? Parse("null");
+                Require(NodeCases.JsonEquals(text, sibling.Value.GetProperty("text")), "A sibling differs.");
             }
+        if (resolver is not null)
+            Require(ReferenceEquals(node, Mounted(resolver, observed!)), "The observed node was replaced.");
         if (expectation.TryGetProperty("surfaceError", out var surfaceError))
         {
             Require(errors.Count == 1, $"Expected one error but {errors.Count} were reported.");
@@ -294,6 +345,12 @@ internal static class RpcCases
 
     private static void RunUiAction(JsonElement expectation, JsonElement scenario)
     {
+        RunUiAction(expectation, scenario, mounted: false);
+        RunUiAction(expectation, scenario, mounted: true);
+    }
+
+    private static void RunUiAction(JsonElement expectation, JsonElement scenario, bool mounted)
+    {
         var surfaceId = scenario.GetProperty("surfaceId").GetString()!;
         var catalogId = scenario.GetProperty("catalogId").GetString()!;
         var registry = new CatalogRegistry(includeBasicCatalog: false);
@@ -301,7 +358,22 @@ internal static class RpcCases
         if (scenario.TryGetProperty("localFunctions", out var local))
             foreach (var definition in local.EnumerateObject())
                 functions[definition.Name] = Declaration(definition.Name, definition.Value);
-        Register(registry, catalogId, functions);
+        // The mounted run places the action on a root Button with a text label.
+        var components = new[]
+        {
+            Parse(new JsonObject
+            {
+                ["id"] = "root",
+                ["component"] = "Button",
+                ["child"] = "label",
+                ["action"] = JsonNode.Parse(scenario.GetProperty("actionPayload").GetRawText())
+            }.ToJsonString()),
+            Parse("""{"id":"label","component":"Text","text":"Run"}""")
+        };
+        if (mounted)
+            foreach (var (name, declaration) in RemoteDeclarations(components, functions.Select(entry => entry.Key).ToHashSet()).ToArray())
+                functions[name] = declaration!.DeepClone();
+        Register(registry, catalogId, functions, mounted);
         using var session = new SurfaceSession(registry);
         Apply(session, new JsonObject
         {
@@ -332,7 +404,24 @@ internal static class RpcCases
         using var router = new FunctionCallRouter(session, registry, evaluator, client);
         router.ErrorReported += errors.Add;
         router.ActionDispatched += events.Add;
-        router.InvokeFunctionAction(surfaceId, "source", "/", scenario.GetProperty("actionPayload"), results.Add);
+        using var resolver = mounted ? new NodeResolver(session, registry, surfaceId, router) : null;
+        if (resolver is not null)
+        {
+            Apply(session, new JsonObject
+            {
+                ["version"] = "1.0",
+                ["updateComponents"] = new JsonObject
+                {
+                    ["surfaceId"] = surfaceId,
+                    ["components"] = new JsonArray(components.Select(component => JsonNode.Parse(component.GetRawText())).ToArray())
+                }
+            });
+            Require(resolver.RouteFunctionAction(Mounted(resolver, "root"), "action", results.Add) is null, "The action was refused.");
+        }
+        else
+        {
+            router.InvokeFunctionAction(surfaceId, "source", "/", scenario.GetProperty("actionPayload"), results.Add);
+        }
         Require(sent.Count == 1 && results.Count == 0 && errors.Count == 0, "Expected one pending call.");
         var outbound = sent[0].Payload;
         var callId = outbound.GetProperty("functionCallId").GetString();
@@ -368,10 +457,24 @@ internal static class RpcCases
 
     // ---- agent_function_routing ----
 
+    // Cases that also run through the mounted nodes of a NodeResolver. Their steps evaluate only bindings and checks.
+    private static readonly HashSet<string> MountedRoutingCases = new(StringComparer.Ordinal)
+    {
+        "test_agent_routing_pending_check_rule_is_not_failing"
+    };
+
     private static void RunRouting(JsonElement test)
+    {
+        RunRouting(test, mounted: false);
+        if (MountedRoutingCases.Contains(test.GetProperty("name").GetString()!))
+            RunRouting(test, mounted: true);
+    }
+
+    private static void RunRouting(JsonElement test, bool mounted)
     {
         var registry = new CatalogRegistry(includeBasicCatalog: false);
         var basic = BasicFunctionDeclarations();
+        var steps = test.GetProperty("steps").EnumerateArray().ToArray();
         foreach (var catalog in test.GetProperty("catalogs").EnumerateArray())
         {
             var functions = new JsonObject();
@@ -381,7 +484,13 @@ internal static class RpcCases
             if (catalog.TryGetProperty("agentFunctions", out var declared))
                 foreach (var function in declared.EnumerateObject())
                     functions[function.Name] = Declaration(function.Name, function.Value, function.Value.TryGetProperty("args", out var schema) ? schema : null);
-            Register(registry, catalog.GetProperty("catalogId").GetString()!, functions);
+            if (mounted)
+            {
+                var evaluated = steps.Where(step => step.TryGetProperty("evaluate", out _)).Select(step => step.GetProperty("evaluate")).ToArray();
+                foreach (var (name, declaration) in RemoteDeclarations(evaluated, functions.Select(entry => entry.Key).ToHashSet()).ToArray())
+                    functions[name] = declaration!.DeepClone();
+            }
+            Register(registry, catalog.GetProperty("catalogId").GetString()!, functions, mounted);
         }
 
         var surface = test.GetProperty("surface");
@@ -390,6 +499,8 @@ internal static class RpcCases
             create["catalogId"] = defaultCatalog.GetString();
         if (test.TryGetProperty("dataModel", out var model))
             create["dataModel"] = JsonNode.Parse(model.GetRawText());
+        if (mounted)
+            create["components"] = new JsonArray(new JsonObject { ["id"] = "root", ["component"] = "Column", ["children"] = new JsonArray() });
         using var session = new SurfaceSession(registry);
         Apply(session, new JsonObject { ["version"] = "1.0", ["createSurface"] = create });
 
@@ -401,9 +512,11 @@ internal static class RpcCases
         using var router = new FunctionCallRouter(session, registry, new FunctionEvaluator(registry), client);
         router.ErrorReported += errors.Add;
         router.ActionDispatched += actions.Add;
+        using var resolver = mounted ? new NodeResolver(session, registry, "main", router) : null;
 
-        var bindings = new List<(FunctionBinding Binding, bool IsCheck)>();
-        foreach (var step in test.GetProperty("steps").EnumerateArray())
+        var observations = new List<Observation>();
+        var mountedIds = new JsonArray();
+        foreach (var step in steps)
         {
             var sentBefore = sent.Count;
             var errorsBefore = errors.Count;
@@ -414,15 +527,21 @@ internal static class RpcCases
                 var mode = step.TryGetProperty("as", out var kind) ? kind.GetString() : "binding";
                 switch (mode)
                 {
-                    case "action":
+                    case "action" when resolver is null:
                         router.Invoke("main", "source", "/", Parse(new JsonObject { ["functionCall"] = JsonNode.Parse(evaluate.GetRawText()) }.ToJsonString()));
                         break;
-                    case "event":
+                    case "event" when resolver is null:
                         router.Invoke("main", "source", "/", Parse(new JsonObject { ["event"] = JsonNode.Parse(evaluate.GetRawText()) }.ToJsonString()));
                         break;
-                    default:
-                        bindings.Add((router.Bind("main", "/", evaluate), mode == "check"));
+                    case "binding" or "check" when resolver is not null:
+                        observations.Add(Mount(session, resolver, mountedIds, evaluate, mode == "check"));
                         break;
+                    case "binding" or "check":
+                        var binding = router.Bind("main", "/", evaluate);
+                        observations.Add(new(mode == "check", () => binding.Passes, () => binding.Value));
+                        break;
+                    default:
+                        throw new InvalidDataException($"The mounted adapter does not support '{mode}' steps.");
                 }
             }
             else if (step.TryGetProperty("respond", out var respond))
@@ -454,12 +573,50 @@ internal static class RpcCases
                 throw new InvalidDataException("Unknown step.");
             }
 
-            CheckStep(step, sent.Skip(sentBefore).ToList(), errors.Skip(errorsBefore).ToList(), actions.Skip(actionsBefore).ToList(), bindings);
+            CheckStep(step, sent.Skip(sentBefore).ToList(), errors.Skip(errorsBefore).ToList(), actions.Skip(actionsBefore).ToList(), observations);
         }
     }
 
+    // A value the steps observe: a router binding, or a property or check rule of a mounted node.
+    private sealed record Observation(bool IsCheck, Func<bool> Passes, Func<JsonElement> Value);
+
+    // Adds a component that holds the expression to the root Column. A check rule passes while it is pending or valid.
+    private static Observation Mount(SurfaceSession session, NodeResolver resolver, JsonArray mountedIds, JsonElement expression, bool isCheck)
+    {
+        var id = "evaluated" + mountedIds.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        mountedIds.Add(id);
+        var component = isCheck
+            ? new JsonObject
+            {
+                ["id"] = id,
+                ["component"] = "TextField",
+                ["label"] = "Checked",
+                ["value"] = "",
+                ["@checks"] = new JsonArray(new JsonObject { ["condition"] = JsonNode.Parse(expression.GetRawText()), ["message"] = "Check failed" })
+            }
+            : new JsonObject { ["id"] = id, ["component"] = "Text", ["text"] = JsonNode.Parse(expression.GetRawText()) };
+        Apply(session, new JsonObject
+        {
+            ["version"] = "1.0",
+            ["updateComponents"] = new JsonObject
+            {
+                ["surfaceId"] = "main",
+                ["components"] = new JsonArray(
+                    new JsonObject { ["id"] = "root", ["component"] = "Column", ["children"] = mountedIds.DeepClone() },
+                    component)
+            }
+        });
+        return isCheck
+            ? new(true, () => Mounted(resolver, id).Checks[0].State is CheckState.Pending or CheckState.Valid, () => Parse("null"))
+            : new(false, () => true, () => Mounted(resolver, id).Props["text"].Value ?? Parse("null"));
+    }
+
+    private static ResolvedNode Mounted(NodeResolver resolver, string componentId) =>
+        resolver.Nodes.SingleOrDefault(node => node.ComponentId == componentId) ??
+        throw new InvalidDataException($"Component '{componentId}' is not mounted.");
+
     private static void CheckStep(JsonElement step, List<WireMessage> sent, List<RendererError> errors,
-        List<WireMessage> actions, List<(FunctionBinding Binding, bool IsCheck)> bindings)
+        List<WireMessage> actions, List<Observation> bindings)
     {
         var expectedCalls = step.TryGetProperty("expectOutbound", out var outbound) ? outbound.EnumerateArray().ToList() : [];
         Require(sent.Count == expectedCalls.Count, $"Expected {expectedCalls.Count} outbound calls but {sent.Count} were sent.");
@@ -507,21 +664,50 @@ internal static class RpcCases
         Require(bindings.Count == expectedValues.Count, $"Expected {expectedValues.Count} values but {bindings.Count} bindings exist.");
         for (var i = 0; i < bindings.Count; i++)
         {
-            var (binding, isCheck) = bindings[i];
-            var matches = isCheck
-                ? expectedValues[i].ValueKind == (binding.Passes ? JsonValueKind.True : JsonValueKind.False)
-                : NodeCases.JsonEquals(binding.Value, expectedValues[i]);
-            Require(matches, $"Value {i} is {(isCheck ? binding.Passes.ToString() : binding.Value.GetRawText())} but expected {expectedValues[i].GetRawText()}.");
+            var binding = bindings[i];
+            var matches = binding.IsCheck
+                ? expectedValues[i].ValueKind == (binding.Passes() ? JsonValueKind.True : JsonValueKind.False)
+                : NodeCases.JsonEquals(binding.Value(), expectedValues[i]);
+            Require(matches, $"Value {i} is {(binding.IsCheck ? binding.Passes().ToString() : binding.Value().GetRawText())} but expected {expectedValues[i].GetRawText()}.");
         }
     }
 
     // ---- catalogs ----
 
-    private static JsonObject BasicFunctionDeclarations()
+    private static JsonObject BasicFunctionDeclarations() => BasicDefinition()["functions"]!.DeepClone().AsObject();
+
+    private static JsonObject BasicDefinition()
     {
         var basic = new CatalogRegistry();
         Require(basic.TryGetDefinition(CatalogRegistry.BasicCatalogId, out var definition), "The Basic Catalog is unavailable.");
-        return JsonNode.Parse(definition.GetProperty("functions").GetRawText())!.AsObject();
+        return JsonNode.Parse(definition.GetRawText())!.AsObject();
+    }
+
+    // Core validates component calls against the catalog, so a mounted run declares each function that the fixture
+    // leaves to the agent. A declaration without an implementation routes to the agent as an undeclared function does,
+    // and the any-object argument schema sends the arguments unchanged.
+    private static JsonObject RemoteDeclarations(IEnumerable<JsonElement> values, HashSet<string> local)
+    {
+        var declarations = new JsonObject();
+        void Visit(JsonElement value)
+        {
+            if (value.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in value.EnumerateArray())
+                    Visit(item);
+                return;
+            }
+            if (value.ValueKind != JsonValueKind.Object)
+                return;
+            if (value.TryGetProperty("@call", out var call) && call.GetString() is { } name && !name.StartsWith('@') &&
+                !local.Contains(name) && !declarations.ContainsKey(name))
+                declarations[name] = Declaration(name, Parse("{}"));
+            foreach (var member in value.EnumerateObject())
+                Visit(member.Value);
+        }
+        foreach (var value in values)
+            Visit(value);
+        return declarations;
     }
 
     // A catalog function that the fixture describes with its metadata. The args schema defaults to any object.
@@ -548,17 +734,41 @@ internal static class RpcCases
         return declaration;
     }
 
-    private static void Register(CatalogRegistry registry, string catalogId, JsonObject functions)
+    // A mounted run copies the Basic Catalog components it places, with the shared definitions they reference, and
+    // lists those components and the functions in the catalog's unions.
+    private static void Register(CatalogRegistry registry, string catalogId, JsonObject functions, bool mounted = false)
     {
+        var components = new JsonObject();
+        var definitions = new JsonObject();
+        if (mounted)
+        {
+            var basic = BasicDefinition();
+            foreach (var name in new[] { "Button", "Column", "Text", "TextField" })
+                components[name] = basic["components"]![name]!.DeepClone();
+            foreach (var (name, schema) in basic["$defs"]!.AsObject())
+                if (name is not ("anyComponent" or "anyFunction"))
+                    definitions[name] = schema!.DeepClone();
+            definitions["anyComponent"] = new JsonObject
+            {
+                ["oneOf"] = Union("components", components),
+                ["discriminator"] = new JsonObject { ["propertyName"] = "component" }
+            };
+            definitions["anyFunction"] = functions.Count == 0 ? false : new JsonObject { ["oneOf"] = Union("functions", functions) };
+        }
         var definition = new JsonObject
         {
             ["protocolVersion"] = WireMessage.Version,
             ["catalogId"] = catalogId,
-            ["components"] = new JsonObject(),
+            ["components"] = components,
             ["functions"] = functions
         };
+        if (definitions.Count > 0)
+            definition["$defs"] = definitions;
         Require(registry.TryRegister(Encoding.UTF8.GetBytes(definition.ToJsonString()), out var error),
             error?.ToString() ?? "Catalog registration failed.");
+
+        static JsonArray Union(string group, JsonObject members) =>
+            new(members.Select(member => (JsonNode)new JsonObject { ["$ref"] = $"#/{group}/{member.Key}" }).ToArray());
     }
 
     private static WireMessage Decode(JsonElement message, WireDirection direction) =>

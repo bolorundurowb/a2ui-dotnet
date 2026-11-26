@@ -20,7 +20,8 @@ namespace A2UI.Core;
 /// when the surface data changes and when an answer arrives. Identical calls, meaning the same function, catalog and resolved
 /// arguments, share one request on a surface, and the router keeps the answer for later bindings. A failed call is not kept
 /// as an answer. The binding that waited for it remembers the failure and sends the call again only when the arguments of
-/// that call change. A call that was cancelled leaves no trace, so the next evaluation sends it again.
+/// that call change. A call that was cancelled leaves no trace, so the next evaluation sends it again. Disposing a binding
+/// cancels the agent call it waits for when no other live binding shares that call, so the agent's late answer is ignored.
 /// </para>
 /// <para>
 /// An action from <see cref="Invoke"/> is imperative. It never shares or caches a call, because each invocation must run the
@@ -68,17 +69,36 @@ public sealed class FunctionCallRouter : IDisposable
     /// <param name="expression">A literal, a <c>@path</c> binding, a <c>@call</c> or an object or array that contains them. A check rule passes its condition.</param>
     /// <returns>The binding. Dispose it when the component that owns the expression goes away.</returns>
     /// <exception cref="InvalidOperationException">The surface does not exist.</exception>
-    public FunctionBinding Bind(string surfaceId, string dataPath, JsonElement expression)
+    public FunctionBinding Bind(string surfaceId, string dataPath, JsonElement expression) =>
+        BindCore(surfaceId, dataPath, expression, managed: false);
+
+    // A managed binding is evaluated again only by its owner through Reevaluate, or when an answer it waits for settles.
+    // NodeResolver owns its bindings this way so that a data change never evaluates a node that the change detaches.
+    internal FunctionBinding BindManaged(string surfaceId, string dataPath, JsonElement expression) =>
+        BindCore(surfaceId, dataPath, expression, managed: true);
+
+    private FunctionBinding BindCore(string surfaceId, string dataPath, JsonElement expression, bool managed)
     {
         ArgumentNullException.ThrowIfNull(surfaceId);
         ArgumentNullException.ThrowIfNull(dataPath);
         ObjectDisposedException.ThrowIf(_disposed, this);
         var state = StateFor(surfaceId);
-        var binding = new FunctionBinding(this, surfaceId, dataPath, expression);
+        var binding = new FunctionBinding(this, surfaceId, dataPath, expression, managed);
         state.Bindings.Add(binding);
         Evaluate(binding);
         return binding;
     }
+
+    internal SurfaceSession Session => _session;
+
+    internal CatalogRegistry Catalogs => _catalogs;
+
+    internal FunctionEvaluator Functions => _functions;
+
+    // Whether a binding can wait for the agent. Without that, a call the renderer cannot run fails as it does locally.
+    internal bool CanRoute => !_disposed && _agent is { CanSend: true };
+
+    internal void Reevaluate(FunctionBinding binding) => Evaluate(binding);
 
     /// <summary>Runs an action that a component defines.</summary>
     /// <param name="surfaceId">The live surface that owns the component.</param>
@@ -186,8 +206,19 @@ public sealed class FunctionCallRouter : IDisposable
 
     internal void Release(FunctionBinding binding)
     {
-        if (_surfaces.TryGetValue(binding.SurfaceId, out var state))
-            state.Bindings.Remove(binding);
+        if (!_surfaces.TryGetValue(binding.SurfaceId, out var state))
+            return;
+        state.Bindings.Remove(binding);
+        foreach (var entry in state.Cache.Values.ToArray())
+        {
+            if (entry.Settled || entry.Waiters.RemoveWhere(waiter => waiter.Binding == binding) == 0 ||
+                entry.Waiters.Any(waiter => !waiter.Binding.Ended))
+                continue;
+            // Removing the entry first makes the cancellation callback a no-op, so nothing is reported.
+            state.Cache.Remove(entry.Key);
+            if (entry.CallId is { } callId)
+                _agent?.Cancel(callId);
+        }
     }
 
     private SurfaceState StateFor(string surfaceId)
@@ -207,7 +238,8 @@ public sealed class FunctionCallRouter : IDisposable
             DropSurface(change.SurfaceId);
         else if (change.Kind is "updateDataModel" or "updateComponents")
             foreach (var binding in state.Bindings.ToArray())
-                Evaluate(binding);
+                if (!binding.Managed)
+                    Evaluate(binding);
     }
 
     private void DropSurface(string surfaceId)
@@ -265,6 +297,7 @@ public sealed class FunctionCallRouter : IDisposable
             // A cancelled call leaves no trace. The next evaluation of its bindings sends it again.
             if (IsCancellation(outcome))
                 return;
+            entry.Failed = true;
             foreach (var (binding, site) in entry.Waiters)
                 binding.FailedSites[site] = entry.Key;
             ReportAgentFailure(surfaceId, entry.CallId, outcome);
@@ -556,6 +589,17 @@ public sealed class FunctionCallRouter : IDisposable
                 state.Cache.Remove(key);
                 throw;
             }
+
+            // An in-process agent can answer inside Send, before this binding is registered as a waiter.
+            if (entry.Settled)
+                return Outcome.Of(entry.Value);
+            if (entry.Failed)
+            {
+                binding.FailedSites[site] = key;
+                return Outcome.Fail(null);
+            }
+            if (!state.Cache.ContainsKey(key))
+                return Outcome.Fail(null);
         }
         entry.Waiters.Add((binding, site));
         return Outcome.Waiting;
@@ -666,6 +710,7 @@ public sealed class FunctionCallRouter : IDisposable
         public string Key { get; } = key;
         public string? CallId { get; set; }
         public bool Settled { get; set; }
+        public bool Failed { get; set; }
         public JsonElement Value { get; set; }
         public HashSet<(FunctionBinding Binding, string Site)> Waiters { get; } = [];
     }
@@ -715,12 +760,13 @@ public sealed class FunctionBinding : IDisposable
     private EvaluationStatus _status;
     private JsonElement _value = FunctionValues.Null;
 
-    internal FunctionBinding(FunctionCallRouter router, string surfaceId, string dataPath, JsonElement expression)
+    internal FunctionBinding(FunctionCallRouter router, string surfaceId, string dataPath, JsonElement expression, bool managed)
     {
         _router = router;
         SurfaceId = surfaceId;
         DataPath = dataPath;
         Expression = expression;
+        Managed = managed;
     }
 
     /// <summary>The current value, or a JSON null while the call is pending and after it fails.</summary>
@@ -744,7 +790,7 @@ public sealed class FunctionBinding : IDisposable
     /// <summary>Raised when the value or the state of the binding changes.</summary>
     public event Action? Changed;
 
-    /// <summary>Stops evaluating the binding.</summary>
+    /// <summary>Stops evaluating the binding and cancels the agent call it waits for, unless another live binding shares that call.</summary>
     public void Dispose()
     {
         if (Ended)
@@ -756,6 +802,7 @@ public sealed class FunctionBinding : IDisposable
     internal string SurfaceId { get; }
     internal string DataPath { get; }
     internal JsonElement Expression { get; }
+    internal bool Managed { get; }
     internal bool Ended { get; private set; }
     internal Dictionary<string, string> FailedSites { get; } = new(StringComparer.Ordinal);
     internal HashSet<string> Reported { get; } = new(StringComparer.Ordinal);
