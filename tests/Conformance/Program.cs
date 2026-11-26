@@ -71,6 +71,7 @@ foreach (var suite in new[] { "core", "agent" })
                     "The fixture pairs requiresUserActivation with rendererOrAgent. The pinned catalog schema only allows this requirement on rendererOnly functions.",
                 _ when !scaling && path == RendererFunctionCases.Path => null,
                 _ when !scaling && path == AgentFunctionCases.Path => null,
+                _ when !scaling && path == DataModelCases.Path => null,
                 (_, _, MacroCases.Path) when id == "36_surface_lifecycle_delete_recreate_and_null_catalog_id" =>
                     "The case sends \"@catalogId\": null. The pinned message schema requires a string and Core rejects the null when it decodes the message, so the expander never sees it.",
                 _ when !scaling && path == MacroCases.Path => null,
@@ -118,6 +119,8 @@ foreach (var suite in new[] { "core", "agent" })
                         RendererFunctionCases.Run(test);
                     else if (path == AgentFunctionCases.Path)
                         AgentFunctionCases.Run(test, assets);
+                    else if (path == DataModelCases.Path)
+                        DataModelCases.Run(test);
                     else if (path == MacroCases.Path)
                         MacroCases.Run(test, document, assets);
                     else if (suite == "agent")

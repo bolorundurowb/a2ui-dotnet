@@ -91,6 +91,7 @@ internal static class CoreSmoke
         Require(session.Apply(delete) is null && notifications == 4);
         Require(session.Apply(create) is null && notifications == 5);
         CheckDataWrites(session);
+        CheckDataModel(registry);
         CheckExpressionScope();
         CheckNodeResolver(registry);
         CheckNestedTemplateIdentity(registry);
@@ -1242,6 +1243,117 @@ internal static class CoreSmoke
             {"version":"1.0","updateDataModel":{"surfaceId":"form","path":"/edit/~2","value":0}}
             """u8.ToArray(), WireDirection.AgentToRenderer, out _, out var error) &&
             error?.Path == "/updateDataModel/path", error);
+    }
+
+    // Covers behaviour that data_model.yaml does not pin: value ownership, refused writes, list slots, escaped keys,
+    // observer lifetime and the shared pointer rules of the wire path.
+    private static void CheckDataModel(CatalogRegistry registry)
+    {
+        static JsonElement Json(string text)
+        {
+            using var document = JsonDocument.Parse(text);
+            return document.RootElement.Clone();
+        }
+
+        static JsonElement Read(DataModel model, string path)
+        {
+            Require(model.Get(path, out var value) is null);
+            return value;
+        }
+
+        var model = new DataModel();
+        var released = JsonDocument.Parse("""{"id":9007199254740993,"tags":["a"]}""");
+        Require(model.Set("/user", released.RootElement) is null);
+        released.Dispose();
+        Require(Read(model, "/user/id").GetRawText() == "9007199254740993");
+        var rootDocument = JsonDocument.Parse("""{"kept":true}""");
+        Require(model.Set("/", rootDocument.RootElement) is null);
+        rootDocument.Dispose();
+        Require(model.Value.GetRawText() == """{"kept":true}""");
+
+        model = new DataModel(Json("""{"user":{"name":"Ada"},"items":["a","b"],"slot":null,"a/b":{"x":1}}"""));
+        var changes = new List<string>();
+        Require(model.Observe("/user", _ => changes.Add("user"), out var user) is null);
+        Require(model.Observe("/a~1b", _ => changes.Add("escaped"), out var escaped) is null);
+        Require(model.Observe("/a/b", _ => changes.Add("nested"), out var nested) is null);
+
+        // A refused write leaves the model as it was, with no containers created on the way and no notifications.
+        var before = model.Value.GetRawText();
+        Require(model.Set("/user/name/first/deep", Json("1"))?.Code == "invalidDataPath");
+        Require(model.Set("/items/10001", Json("1"))?.Code == "invalidDataPath");
+        Require(model.Set("/items/-1", Json("1"))?.Code == "invalidDataPath");
+        Require(model.Set("/bad/~2", Json("1"))?.Code == "invalidDataPath");
+        Require(model.Set("relative", Json("1"))?.Code == "invalidDataPath");
+        Require(model.Set("/user/__proto__", Json("1"))?.Code == "forbiddenPathKey");
+        Require(model.Delete("/user/constructor")?.Code == "forbiddenPathKey");
+        Require(model.Observe("/prototype", _ => { }, out var rejected)?.Code == "forbiddenPathKey" && rejected is null);
+        Require(model.Value.GetRawText() == before);
+        Require(changes.Count == 0);
+
+        // Observers compare whole segments after unescaping, so /a~1b is neither /a/b nor an ancestor of it.
+        Require(model.Set("/a~1b/x", Json("2")) is null && changes.SequenceEqual(new[] { "escaped" }));
+        changes.Clear();
+        Require(model.Set("/a/b", Json("1")) is null && changes.SequenceEqual(new[] { "nested" }));
+        changes.Clear();
+        Require(model.Set("/a/b", Json("1.0")) is null && changes.Count == 0);
+        Require(nested!.Value.GetRawText() == "1");
+
+        // A null slot becomes a container on write. Deleting a list element keeps the list length.
+        Require(model.Set("/slot/value", Json("true")) is null && Read(model, "/slot/value").GetBoolean());
+        Require(model.Delete("/items/0") is null && Read(model, "/items").GetRawText() == "[null,\"b\"]");
+        Require(model.Set("/items/3", Json("\"d\"")) is null && Read(model, "/items").GetRawText() == "[null,\"b\",null,\"d\"]");
+        Require(model.Delete("/user/name") is null && Read(model, "/user").GetRawText() == "{}");
+        Require(model.Delete("/user/name/first") is null && model.Delete("/items/9") is null && Read(model, "/items").GetArrayLength() == 4);
+        Require(model.Get("/user/name", out var absent) is null && absent.ValueKind == JsonValueKind.Undefined);
+        Require(user!.Value.GetRawText() == "{}");
+
+        // Disposing one subscription stops only that observer, more than once is harmless, and a callback may write.
+        changes.Clear();
+        escaped!.Dispose();
+        escaped.Dispose();
+        Require(model.Set("/a~1b/x", Json("3")) is null && changes.Count == 0);
+        var nestedWrites = 0;
+        Require(model.Observe("/trigger", value =>
+        {
+            nestedWrites++;
+            if (value.GetInt32() == 1)
+                Require(model.Set("/trigger", Json("2")) is null);
+        }, out var trigger) is null);
+        Require(model.Set("/trigger", Json("1")) is null && nestedWrites == 2 && trigger!.Value.GetInt32() == 2);
+
+        // Model disposal detaches everything but leaves the data usable.
+        model.Dispose();
+        changes.Clear();
+        Require(model.Set("/user/name", Json("\"Bo\"")) is null && changes.Count == 0 && Read(model, "/user/name").GetString() == "Bo");
+        try
+        {
+            model.Observe("/user", _ => { }, out _);
+            throw new InvalidOperationException("Expected an observer on a disposed model to be refused.");
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        // The wire path shares the pointer rules: lists pad, deleting an absent value does nothing, and null slots are replaced.
+        using var session = new SurfaceSession(registry);
+        Require(session.Apply(Decode($$$$"""
+            {"version":"1.0","createSurface":{"surfaceId":"data","catalogId":"{{{{CatalogRegistry.BasicCatalogId}}}}",
+              "dataModel":{"items":["a"],"slot":null}}}
+            """)) is null);
+        Require(session.Apply(Decode("""
+            {"version":"1.0","updateDataModel":{"surfaceId":"data","path":"/items/2","value":"c"}}
+            """)) is null && session.TryGetSurface("data", out var padded) &&
+            padded!.DataModel.GetProperty("items").GetRawText() == "[\"a\",null,\"c\"]");
+        Require(session.Apply(Decode("""
+            {"version":"1.0","updateDataModel":{"surfaceId":"data","path":"/items/10001","value":"x"}}
+            """))?.Code == "invalidDataPath");
+        Require(session.Apply(Decode("""
+            {"version":"1.0","updateDataModel":{"surfaceId":"data","path":"/items/40","value":null}}
+            """)) is null && session.TryGetSurface("data", out var kept) && kept!.DataModel.GetProperty("items").GetArrayLength() == 3);
+        Require(session.Apply(Decode("""
+            {"version":"1.0","updateDataModel":{"surfaceId":"data","path":"/slot/inner","value":1}}
+            """)) is null && session.TryGetSurface("data", out var filled) &&
+            filled!.DataModel.GetProperty("slot").GetRawText() == """{"inner":1}""");
     }
 
     private static WireMessage Decode(string json, WireDirection direction = WireDirection.AgentToRenderer)
