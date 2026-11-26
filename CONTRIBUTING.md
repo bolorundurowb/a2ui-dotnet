@@ -36,6 +36,21 @@ When intentionally changing the SDK API, regenerate the signature snapshots from
 
 The snapshots in `tests/PublicApi/` record public and protected signatures from the packaged assemblies on .NET 11. The regular smoke run compares the generated signatures with the checked-in files. The [upstream guide](upstream/README.md) covers fixture provenance and refreshes.
 
+## ASP.NET Core SSE sample
+
+Run the backpressure smoke check from the repository root, then launch the
+sample on loopback. Run the HTTP smoke script from a second terminal while the
+server is running.
+
+```powershell
+dotnet run --project tests/AspNetCoreSseSmoke -c Release
+dotnet run --project samples/AspNetCoreSse -c Release -- --urls http://127.0.0.1:5080
+./samples/AspNetCoreSse/Test-Sample.ps1
+```
+
+See the [SSE sample guide](samples/AspNetCoreSse/README.md) for the framing,
+metadata and reconnect contract.
+
 ## Pinned conformance and schema comparison
 
 Run the correctness and scaling inventory separately. The JSON reports include
