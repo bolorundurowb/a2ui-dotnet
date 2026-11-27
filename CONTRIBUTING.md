@@ -77,6 +77,37 @@ When refreshing the pinned assets, follow the [upstream refresh procedure](upstr
 See the [schema profile and comparison](docs/schema-validation.md) for the
 measured workload and current limits.
 
+The Express peer check compares all 43 Basic Catalog examples with Python.
+It requires Python 3.10 or newer and uses the pinned peer SDK versions in
+`upstream/a2ui-baseline.json`. The regular .NET conformance run needs no Python.
+
+```powershell
+$assets = ./scripts/Get-UpstreamBaseline.ps1
+python -m venv artifacts/express-peer
+$peer = './artifacts/express-peer/Scripts/python.exe'
+& $peer -m pip install a2ui-agent-sdk==0.12.0 a2ui-core==0.7.0
+dotnet run --project tests/Conformance -c Release -- $assets artifacts/express-peer.json --express-peer
+& $peer scripts/Test-ExpressPeer.py $assets artifacts/express-peer.json
+```
+
+To repeat against the pinned Agent source using the same Python dependencies,
+run the following in the same PowerShell session. The fetched Git objects are
+in the sibling `source` directory returned by the baseline script.
+
+```powershell
+$run = Split-Path $assets
+$archive = Join-Path $run 'python-agent.tar'
+git -C (Join-Path $run 'source') archive --format=tar --output=$archive FETCH_HEAD python/a2ui_agent/src
+tar -xf $archive -C $run
+$previousPythonPath = $env:PYTHONPATH
+try {
+    $env:PYTHONPATH = Join-Path $run 'python/a2ui_agent/src'
+    & $peer scripts/Test-ExpressPeer.py $assets artifacts/express-peer.json
+} finally {
+    $env:PYTHONPATH = $previousPythonPath
+}
+```
+
 The conformance workflow uploads both case reports and a refreshed badge.
 The badge counts each upstream case once and includes excluded cases in the
 total. The badge colour reflects the percentage passing, with bands starting
