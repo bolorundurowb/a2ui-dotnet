@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(SmokeVersion)' == ''">
+    <ProjectReference Include="../../src/A2UI.Agent/A2UI.Agent.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(SmokeVersion)' != ''">
+    <PackageReference Include="A2UI.Agent" Version="[$(SmokeVersion)]" />
+  </ItemGroup>
+</Project>
