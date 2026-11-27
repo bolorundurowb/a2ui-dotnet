@@ -16,7 +16,8 @@ public static class ExpressionTemplate
     /// <param name="catalogId">The catalog selected for the enclosing formatString call.</param>
     /// <param name="invoke">An optional host resolver for function calls, receiving the catalog ID, function name, and resolved arguments. System calls receive a null catalog ID.</param>
     /// <param name="result">The interpolated string on success.</param>
-    /// <param name="diagnostic">The reason evaluation failed, if any.</param>
+    /// <param name="diagnostic"><c>ParseError</c> for invalid syntax or exceeded parser limits, or
+    /// <c>ExpressionError</c> for an invalid path, unavailable function resolver or result longer than 1,048,576 UTF-16 code units.</param>
     /// <returns>Whether the template was evaluated. Missing paths interpolate as empty strings.</returns>
     public static bool TryEvaluate(string template, JsonElement dataModel, JsonElement scope, string? catalogId,
         Func<string?, string, IReadOnlyDictionary<string, JsonElement>, JsonElement>? invoke,
@@ -83,7 +84,9 @@ public static class ExpressionTemplate
     /// <summary>Parses a template into literals, path bindings, and function calls.</summary>
     /// <param name="template">The template to parse, limited to 65,536 UTF-16 code units.</param>
     /// <param name="parts">The owned JSON array of parsed parts.</param>
-    /// <param name="diagnostic">The parser diagnostic when parsing fails.</param>
+    /// <param name="diagnostic"><c>ParseError</c> for invalid syntax or exceeded limits.</param>
+    /// <remarks>The outer expression starts at depth one. Nested interpolations and function arguments
+    /// each add one level. The maximum expression depth is 100.</remarks>
     /// <returns>Whether parsing succeeded.</returns>
     public static bool TryParse(string template, out JsonElement parts, out A2uiDiagnostic? diagnostic)
     {

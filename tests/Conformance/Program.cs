@@ -15,6 +15,9 @@ var yaml = new DeserializerBuilder().WithAttemptingUnquotedStringTypeDeserializa
     .WithNodeDeserializer(new DoubleScalarDeserializer(), syntax => syntax.OnTop()).Build();
 var results = new List<CaseResult>();
 
+if (!scaling)
+    ExpressionChecks.Run();
+
 foreach (var suite in new[] { "core", "agent" })
 {
     var directory = Path.Combine(assets, "conformance", suite);
