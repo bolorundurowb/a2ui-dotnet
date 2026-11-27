@@ -26,6 +26,8 @@ dotnet build A2UI.slnx -c Release
 
 The smoke script packs both SDKs in Release into a fresh local feed. It checks the NuGet metadata, licences and upstream notices, XML documentation, portable symbols, and Source Link mapping to the Git commit. It restores each package in a clean consumer for every runtime, checks the restored dependency graph, and publishes and runs each framework-dependent app. Agent consumers reference Agent alone and restore the matching Core package. The outputs are under `artifacts/package-smoke/`. The SDK projects use a fixed NuGet archive timestamp so clean rebuilds from the same commit and toolchain produce identical packages.
 
+The package job also compiles and runs the C# examples extracted directly from the [SDK usage guide](docs/usage/README.md). Each example restores only from the temporary package feed. Keep the three examples self-contained when updating the guide.
+
 To replay the cross-language appointment flow against clean SDK packages,
 install the pinned Python peers and run `./scripts/Test-SdkPackages.ps1 -InteropPython python`.
 See the [interoperability guide](tests/Interop/README.md) for setup and transcript details.
@@ -72,6 +74,8 @@ dotnet run --project tests/Conformance -c Release -- $assets artifacts/conforman
 dotnet run --project tests/Conformance -c Release -- $assets artifacts/conformance-scaling.json --scaling
 dotnet run --project tests/SchemaComparison -c Release -- $assets
 ```
+
+When refreshing the pinned assets, follow the [upstream refresh procedure](upstream/README.md#fetch-and-refresh), rerun both inventories and update the verification results and exclusions in [compatibility.md](docs/compatibility.md).
 
 See the [schema profile and comparison](docs/schema-validation.md) for the
 measured workload and current limits.
