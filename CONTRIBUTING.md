@@ -73,6 +73,26 @@ dotnet run --project tests/SchemaComparison -c Release -- $assets
 See the [schema profile and comparison](docs/schema-validation.md) for the
 measured workload and current limits.
 
+To verify the two Core scaling thresholds across runtimes on an otherwise idle
+Windows host, build once and run each runtime separately. The verification
+script saves the medians, full case report, and five CPU samples before and
+after each run. Treat the host as idle when the median of each set of samples is
+at most 10%. Run again if background work raises either median.
+
+```powershell
+$assets = ./scripts/Get-UpstreamBaseline.ps1
+dotnet build tests/Conformance -c Release
+./scripts/Measure-CoreScaling.ps1 -Runtime 8.0.34 -Assets $assets -OutputDirectory artifacts/core-scaling/8
+./scripts/Measure-CoreScaling.ps1 -Runtime 11.0.0 -Assets $assets -OutputDirectory artifacts/core-scaling/11
+```
+
+The [Core scaling verification workflow](.github/workflows/core-scaling.yml)
+runs the same commands on separate hosted runners. The script checks the two
+progressive Core cases and the explicit exclusion of the case that requires
+disabling topology validation. The report retains the Agent results, including
+the streaming failures tracked in [#73](https://github.com/bolorundurowb/a2ui-dotnet/issues/73).
+
+
 The conformance workflow uploads both case reports and a refreshed badge.
 The badge counts each upstream case once and includes excluded cases in the
 total. The badge colour reflects the percentage passing, with bands starting
