@@ -34,7 +34,7 @@ internal static class ProfileCases
         ("conformance/agent/skill.yaml", _) when id.StartsWith("test_express_", StringComparison.Ordinal) =>
             ("pending", "Express skill generation is tracked in #71."),
         ("conformance/core/actions.yaml", "test_action_function_call_local_mutation_no_event_dispatched" or
-            "test_action_function_call_execution_error") =>
+            "test_action_function_call_execution_error") when OutboundCases.ExclusionReason(path, id) is not null =>
             ("pending", "The conformance adapter for registered host effects is tracked in #25."),
         _ => null
     };
