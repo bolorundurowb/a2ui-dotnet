@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$UpdatePublicApi)
+param([switch]$UpdatePublicApi, [string]$InteropPython)
 
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path -Parent $PSScriptRoot
@@ -168,4 +168,19 @@ foreach ($major in 8..11) {
             throw "Public API changed for $package. Review $generated and run this script with -UpdatePublicApi."
         }
     }
+}
+
+if ($InteropPython) {
+    $consumer = Join-Path $run 'interop'
+    New-Item -ItemType Directory -Path $consumer | Out-Null
+    foreach ($file in 'Interop.csproj', 'Program.cs', 'RpcReplay.cs', 'peer.py', 'form.json', 'rpc-catalog.json') {
+        Copy-Item -LiteralPath (Join-Path $repository "tests/Interop/$file") -Destination $consumer
+    }
+    $project = Join-Path $consumer 'Interop.csproj'
+    $properties = @("-p:SmokeVersion=$version", "-p:RuntimeFrameworkVersion=$($versions[8])", '-p:UseAppHost=false')
+    Invoke-DotNet restore $project @properties --source $feed --packages (Join-Path $consumer 'packages') --no-http-cache --force
+    $published = Join-Path $consumer 'publish'
+    Invoke-DotNet publish $project @properties --no-restore --no-self-contained -c Release -o $published
+    & $InteropPython (Join-Path $consumer 'peer.py') (Join-Path $published 'Interop.dll') (Join-Path $consumer 'form.json') $consumer
+    if ($LASTEXITCODE -ne 0) { throw "The Python and .NET interoperability replay failed with exit code $LASTEXITCODE." }
 }

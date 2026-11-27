@@ -26,6 +26,10 @@ dotnet build A2UI.slnx -c Release
 
 The smoke script packs both SDKs in Release into a fresh local feed. It checks the NuGet metadata, licences and upstream notices, XML documentation, portable symbols, and Source Link mapping to the Git commit. It restores each package in a clean consumer for every runtime, checks the restored dependency graph, and publishes and runs each framework-dependent app. Agent consumers reference Agent alone and restore the matching Core package. The outputs are under `artifacts/package-smoke/`. The SDK projects use a fixed NuGet archive timestamp so clean rebuilds from the same commit and toolchain produce identical packages.
 
+To replay the cross-language appointment flow against clean SDK packages,
+install the pinned Python peers and run `./scripts/Test-SdkPackages.ps1 -InteropPython python`.
+See the [interoperability guide](tests/Interop/README.md) for setup and transcript details.
+
 The shared `Version` in `src/Directory.Build.props` sets the NuGet package version for both SDKs using SemVer. Supported A2UI wire versions are recorded separately in the [compatibility matrix](docs/compatibility.md). Package name ownership, publishing credentials and checks against NuGet.org releases are part of the preview release.
 
 When intentionally changing the SDK API, regenerate the signature snapshots from the package consumer and review their diff alongside the source changes.
@@ -35,6 +39,21 @@ When intentionally changing the SDK API, regenerate the signature snapshots from
 ```
 
 The snapshots in `tests/PublicApi/` record public and protected signatures from the packaged assemblies on .NET 11. The regular smoke run compares the generated signatures with the checked-in files. The [upstream guide](upstream/README.md) covers fixture provenance and refreshes.
+
+## ASP.NET Core SSE sample
+
+Run the backpressure smoke check from the repository root, then launch the
+sample on loopback. Run the HTTP smoke script from a second terminal while the
+server is running.
+
+```powershell
+dotnet run --project tests/AspNetCoreSseSmoke -c Release
+dotnet run --project samples/AspNetCoreSse -c Release -- --urls http://127.0.0.1:5080
+./samples/AspNetCoreSse/Test-Sample.ps1
+```
+
+See the [SSE sample guide](samples/AspNetCoreSse/README.md) for the framing,
+metadata and reconnect contract.
 
 ## Pinned conformance and schema comparison
 

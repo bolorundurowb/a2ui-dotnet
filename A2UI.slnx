@@ -4,11 +4,15 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
+  <Folder Name="/samples/">
+    <Project Path="samples/AspNetCoreSse/AspNetCoreSse.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/A2UI.Agent/A2UI.Agent.csproj" />
     <Project Path="src/A2UI.Core/A2UI.Core.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/AspNetCoreSseSmoke/AspNetCoreSseSmoke.csproj" />
     <Project Path="tests/Conformance/Conformance.csproj" />
     <Project Path="tests/PackageSmoke/PackageSmoke.csproj" />
   </Folder>

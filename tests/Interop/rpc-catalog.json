@@ -1,0 +1,35 @@
+{
+  "protocolVersion": "1.0",
+  "catalogId": "https://example.org/appointment/catalog.json",
+  "components": {},
+  "functions": {
+    "echoRenderer": {
+      "type": "object",
+      "returnType": "string",
+      "allowedCallers": "agentOnly",
+      "properties": {
+        "@call": {"const": "echoRenderer"},
+        "args": {
+          "type": "object",
+          "properties": {"fail": {"type": "boolean"}},
+          "required": ["fail"]
+        }
+      },
+      "required": ["@call", "args"]
+    },
+    "echoAgent": {
+      "type": "object",
+      "returnType": "string",
+      "allowedCallers": "rendererOnly",
+      "properties": {
+        "@call": {"const": "echoAgent"},
+        "args": {
+          "type": "object",
+          "properties": {"fail": {"type": "boolean"}},
+          "required": ["fail"]
+        }
+      },
+      "required": ["@call", "args"]
+    }
+  }
+}

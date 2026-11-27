@@ -30,7 +30,16 @@ jobs:
             9.0.x
             10.0.x
             11.0.x
-      - run: ./scripts/Test-SdkPackages.ps1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the pinned interoperability peers
+        run: |
+          $baseline = Get-Content upstream/a2ui-baseline.json -Raw | ConvertFrom-Json
+          $requirements = @($baseline.peerSdks | ForEach-Object { "$($_.package)==$($_.version)" })
+          python -m pip install @requirements
+          exit $LASTEXITCODE
+      - run: ./scripts/Test-SdkPackages.ps1 -InteropPython python
 
   deployment:
     runs-on: windows-latest
