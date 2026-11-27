@@ -80,6 +80,10 @@ public sealed class SurfaceSession : IDisposable
     private bool _disposed;
     private readonly CatalogRegistry _catalogs;
     private readonly GraphValidationOptions _graphValidation;
+    private readonly int _maxComponentsPerSurface;
+
+    /// <summary>The default maximum number of component definitions that may coexist on a surface.</summary>
+    public const int DefaultMaxComponentsPerSurface = 10_000;
 
     /// <summary>Creates a session that accepts progressively delivered component trees.</summary>
     /// <param name="catalogs">The registry used for component and function validation.</param>
@@ -89,9 +93,19 @@ public sealed class SurfaceSession : IDisposable
     /// <param name="catalogs">The registry used for component and function validation.</param>
     /// <param name="graphValidation">The permitted forms of incomplete component trees.</param>
     public SurfaceSession(CatalogRegistry catalogs, GraphValidationOptions graphValidation)
+        : this(catalogs, graphValidation, DefaultMaxComponentsPerSurface) { }
+
+    /// <summary>Creates a session with explicit topology rules and a component limit for each surface.</summary>
+    /// <param name="catalogs">The registry used for component and function validation.</param>
+    /// <param name="graphValidation">The permitted forms of incomplete component trees.</param>
+    /// <param name="maxComponentsPerSurface">The positive limit on component definitions per surface, including orphans.</param>
+    /// <exception cref="ArgumentOutOfRangeException">The component limit is not positive.</exception>
+    public SurfaceSession(CatalogRegistry catalogs, GraphValidationOptions graphValidation, int maxComponentsPerSurface)
     {
         _catalogs = catalogs ?? throw new ArgumentNullException(nameof(catalogs));
         _graphValidation = graphValidation ?? throw new ArgumentNullException(nameof(graphValidation));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxComponentsPerSurface);
+        _maxComponentsPerSurface = maxComponentsPerSurface;
     }
 
     /// <summary>Creates an independent session initially sharing immutable committed snapshots.</summary>
@@ -99,7 +113,7 @@ public sealed class SurfaceSession : IDisposable
     public SurfaceSession Fork()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var copy = new SurfaceSession(_catalogs, _graphValidation);
+        var copy = new SurfaceSession(_catalogs, _graphValidation, _maxComponentsPerSurface);
         foreach (var surface in _surfaces)
             copy._surfaces.Add(surface.Key, surface.Value);
         foreach (var graph in _leafValidation)
@@ -288,6 +302,8 @@ public sealed class SurfaceSession : IDisposable
                 var componentId = component.GetProperty("id").GetString()!;
                 if (!updatePaths.TryAdd(componentId, componentPath))
                     return new("duplicateComponent", componentPath + "/id", $"Duplicate component ID '{componentId}' in the update.");
+                if (components.Count == _maxComponentsPerSurface && !components.ContainsKey(componentId))
+                    return new("componentLimit", kindPath + "/components", "The surface exceeds the component definition limit.");
                 if (_catalogs.ValidateComponent(component, snapshot.CatalogId) is { } problem)
                     return problem with { Path = componentPath + problem.Path };
                 components[componentId] = component;
@@ -328,11 +344,10 @@ public sealed class SurfaceSession : IDisposable
     private A2uiDiagnostic? UpdateData(SurfaceSnapshot snapshot, string path, JsonElement value,
         string diagnosticPath, CancellationToken cancellationToken)
     {
-        if (DataPointer.TryParse(path, out var parsed) &&
-            parsed.FirstOrDefault(segment => segment is "__proto__" or "constructor" or "prototype") is { } forbidden)
-            return new("forbiddenPathKey", diagnosticPath, $"The path '{path}' uses the forbidden key '{forbidden}'.");
         if (!DataPointer.TryParse(path, out var segments))
             return new("invalidDataPath", diagnosticPath, "The data model cannot be updated at this pointer.");
+        if (segments.FirstOrDefault(segment => segment is "__proto__" or "constructor" or "prototype") is { } forbidden)
+            return new("forbiddenPathKey", diagnosticPath, $"The path uses the forbidden key '{forbidden}'.");
         if (value.ValueKind != JsonValueKind.Null &&
             (segments.Length > WireJson.RecursionLimit + 1 || WireJson.ExceedsContainerDepth(value, segments.Length)))
             return new("dataModelDepth", diagnosticPath, "Global recursion limit exceeded.");

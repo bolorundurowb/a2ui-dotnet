@@ -73,13 +73,14 @@ public sealed record RendererError(string Category, string Code, string Message)
     }
 
     /// <summary>Maps the rejection of an envelope that could not be decoded and reads the correlation identifiers from its bytes.</summary>
-    /// <param name="utf8">The envelope that <see cref="WireMessage.TryDecode"/> rejected.</param>
+    /// <param name="utf8">The envelope that <c>WireMessage.TryDecode</c> rejected. Oversized input is not reparsed.</param>
     /// <param name="diagnostic">The rejection.</param>
     /// <returns>The error to report. Identifiers are absent when the envelope is not readable.</returns>
     public static RendererError FromRejectedEnvelope(ReadOnlyMemory<byte> utf8, A2uiDiagnostic diagnostic)
     {
         string? surfaceId = null, functionCallId = null;
-        if (WireJson.TryRead(utf8, out var envelope, out _) && WireJson.IsObject(envelope))
+        if (diagnostic.Code != "messageTooLarge" &&
+            WireJson.TryRead(utf8, out var envelope, out _) && WireJson.IsObject(envelope))
         {
             foreach (var member in envelope.EnumerateObject())
             {

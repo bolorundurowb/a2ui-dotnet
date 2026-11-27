@@ -199,8 +199,20 @@ public sealed class FunctionEvaluator
         return IsImplemented(catalogId, name) ? CallRoute.Local : CallRoute.Agent;
     }
 
-    internal bool IsImplemented(string catalogId, string name) =>
-        _hostFunctions.ContainsKey((catalogId, name)) || BasicFunctions.Names.Contains(name);
+    internal bool IsImplemented(string catalogId, string name)
+    {
+        if (_hostFunctions.ContainsKey((catalogId, name)))
+            return true;
+        if (name != "openUrl")
+            return BasicFunctions.Names.Contains(name);
+
+        // A catalog cannot inherit the URL-opening side effect while weakening its activation rule.
+        return _catalogs.TryGetDefinition(catalogId, out var catalog) &&
+            catalog.TryGetProperty("functions", out var functions) &&
+            functions.TryGetProperty(name, out var declaration) &&
+            declaration.TryGetProperty("requiresUserActivation", out var activation) &&
+            activation.ValueKind == JsonValueKind.True;
+    }
 
     // Runs a call whose arguments are already resolved. The caller has classified it as local.
     internal bool TryInvoke(SurfaceSnapshot surface, string dataPath, string catalogId, string name,

@@ -16,6 +16,8 @@ internal static class CoreSmoke
         CheckValidationSchema();
         CheckCandidateGraph();
         CheckProgressiveLeafComposition();
+        CheckResourceLimits();
+        CheckHostPolicies();
         var custom = """
             {
               "catalogId":"test:cards","protocolVersion":"1.0",
@@ -958,6 +960,131 @@ internal static class CoreSmoke
         """{"version":"1.0","updateComponents":{"surfaceId":""" + Quote(surfaceId) + ",\"components\":" + components + "}}");
 
     private static string Quote(string text) => System.Text.Json.Nodes.JsonValue.Create(text)!.ToJsonString();
+
+    private static void CheckResourceLimits()
+    {
+        const string source = """{"version":"1.0","updateDataModel":{"surfaceId":"s","value":{"note":"₦"}}}""";
+        var bytes = Encoding.UTF8.GetBytes(source);
+        Require(bytes.Length > source.Length);
+        Require(WireMessage.TryDecode(bytes, WireDirection.AgentToRenderer, bytes.Length, out _, out _));
+        Require(!WireMessage.TryDecode(bytes, WireDirection.AgentToRenderer, bytes.Length - 1, out var oversized, out var sizeError) &&
+            oversized is null && sizeError?.Code == "messageTooLarge" && sizeError.Path == "");
+        Require(RendererError.FromRejectedEnvelope(bytes, sizeError!).SurfaceId is null);
+        var invalid = new byte[WireMessage.DefaultMaxEncodedBytes + 1];
+        Require(!WireMessage.TryDecode(invalid, WireDirection.AgentToRenderer, out _, out var defaultError) &&
+            defaultError?.Code == "messageTooLarge");
+
+        var catalogs = RemoteRegistry();
+        using var session = new SurfaceSession(catalogs, GraphValidationOptions.Progressive, maxComponentsPerSurface: 2);
+        const string root = """{"id":"root","component":"Text","text":"Initial"}""";
+        const string other = """{"id":"other","component":"Text","text":"Other"}""";
+        const string third = """{"id":"third","component":"Text","text":"Third"}""";
+        Require(session.Apply(Create("s", "{}", $"[{root},{other},{third}]"))?.Code == "componentLimit");
+        Require(!session.TryGetSurface("s", out _));
+        Require(session.Apply(Create("s", "{}", $"[{root},{other}]")) is null);
+        Require(session.TryGetSurface("s", out var original));
+        var changes = 0;
+        session.Changed += _ => changes++;
+        var replace = root.Replace("Initial", "Updated", StringComparison.Ordinal);
+        Require(session.Apply(UpdateComponents("s", $"[{replace},{third}]"))?.Code == "componentLimit");
+        Require(changes == 0 && session.TryGetSurface("s", out var after) && ReferenceEquals(original, after));
+        using var fork = session.Fork();
+        Require(fork.Apply(UpdateComponents("s", $"[{third}]"))?.Code == "componentLimit");
+        Require(session.Apply(UpdateComponents("s", $"[{replace}]")) is null && changes == 1);
+
+        var sent = new List<WireMessage>();
+        using var client = new AgentFunctionClient(sent.Add);
+        using var router = new FunctionCallRouter(session, catalogs, new FunctionEvaluator(catalogs), client,
+            maxCachedAgentAnswers: 1, timeProvider: null);
+        var firstCall = Json(Lookup("""{"key":"first"}"""));
+        var secondCall = Json(Lookup("""{"key":"second"}"""));
+        using var first = router.Bind("s", "/", firstCall);
+        using var alsoFirst = router.Bind("s", "/", firstCall);
+        using var second = router.Bind("s", "/", secondCall);
+        Require(sent.Count == 2 && first.IsPending && alsoFirst.IsPending && second.IsPending);
+        Require(router.ReceiveResponse(AgentValue(sent[1], "\"secondAnswer\"")));
+        Require(second.Value.ValueEquals("secondAnswer"));
+        Require(router.ReceiveResponse(AgentValue(sent[0], "\"firstAnswer\"")));
+        Require(first.Value.ValueEquals("firstAnswer") && alsoFirst.Value.ValueEquals("firstAnswer"));
+        using var cached = router.Bind("s", "/", firstCall);
+        Require(sent.Count == 2 && cached.Value.ValueEquals("firstAnswer"));
+        using var evicted = router.Bind("s", "/", secondCall);
+        Require(sent.Count == 3 && evicted.IsPending);
+        Require(router.ReceiveResponse(AgentFailure(sent[2], "Unavailable")) && evicted.HasFailed);
+        using var stillCached = router.Bind("s", "/", firstCall);
+        Require(sent.Count == 3 && stillCached.Value.ValueEquals("firstAnswer"));
+
+        // One live expression must settle even when it needs more answers than the shared cache holds.
+        using var siblings = router.Bind("s", "/", Json($"[{firstCall.GetRawText()},{secondCall.GetRawText()}]"));
+        Require(siblings.IsPending && sent.Count == 4);
+        Require(router.ReceiveResponse(AgentValue(sent[3], "\"secondAgain\"")));
+        Require(!siblings.IsPending && siblings.Value[0].ValueEquals("firstAnswer") &&
+            siblings.Value[1].ValueEquals("secondAgain") && sent.Count == 4);
+
+        using var boundedClient = new AgentFunctionClient(_ => { });
+        for (var i = 0; i < AgentFunctionClient.DefaultMaxPendingCalls; i++)
+            boundedClient.Send("s", firstCall, _ => { });
+        try
+        {
+            boundedClient.Send("s", firstCall, _ => { });
+            throw new InvalidOperationException("The default agent pending limit did not reject a call.");
+        }
+        catch (AgentFunctionException failure) when (failure.Code == "PENDING_LIMIT")
+        {
+            Require(boundedClient.PendingCount == AgentFunctionClient.DefaultMaxPendingCalls);
+        }
+    }
+
+    private static void CheckHostPolicies()
+    {
+        const string secret = "private-value-938657";
+        const string inline = """
+            {"protocolVersion":"1.0","catalogId":"test:custom-open","components":{},
+              "functions":{"openUrl":{"type":"object","returnType":"void","allowedCallers":"rendererOrAgent",
+                "properties":{"@call":{"const":"openUrl"},"args":{"type":"object"}},"required":["@call","args"]}}}
+            """;
+        var catalogs = new CatalogRegistry();
+        var bytes = Encoding.UTF8.GetBytes(inline);
+        Require(!catalogs.TryRegisterInline(bytes, allowInlineCatalogs: false, out var policy) &&
+            policy?.Code == "inlineCatalogPolicy" && !catalogs.TryGetDefinition("test:custom-open", out _));
+        Require(!catalogs.TryRegisterInline(new byte[256 * 1024 + 1], allowInlineCatalogs: true, out var tooLarge) &&
+            tooLarge?.Code == "inlineCatalogPolicy");
+        Require(catalogs.TryRegisterInline(bytes, allowInlineCatalogs: true, out var registration), registration);
+        using var session = new SurfaceSession(catalogs);
+        Require(session.Apply(Create("s", "{}", """[{"id":"root","component":"Text","text":"Test"}]""")) is null);
+        Require(session.TryGetSurface("s", out var snapshot));
+        var opened = new List<Uri>();
+        var evaluator = new FunctionEvaluator(catalogs, opened.Add);
+        var builtIn = Json("""{"@call":"openUrl","args":{"url":"https://example.test/path"}}""");
+        Require(!evaluator.TryEvaluate(snapshot!, "/", builtIn, false, out _, out _) && opened.Count == 0);
+        Require(evaluator.TryEvaluate(snapshot!, "/", builtIn, true, out _, out _) && opened.Count == 1);
+        var untrusted = Json("""
+            {"@call":"openUrl","catalogId":"test:custom-open","args":{"url":"https://example.test/path"}}
+            """);
+        Require(!evaluator.TryEvaluate(snapshot!, "/", untrusted, true, out _, out _) && opened.Count == 1);
+        var inbound = Decode("""
+            {"version":"1.0","callRendererFunction":{"surfaceId":"s","functionCallId":"url",
+             "callFunction":{"@call":"openUrl","catalogId":"test:custom-open","args":{"url":"https://example.test/path"}}}}
+            """);
+        var reply = new RendererFunctionHandler(catalogs, evaluator, session).Handle(inbound, userActivation: true);
+        Require(reply.Payload.GetProperty("error").GetProperty("code").ValueEquals("EXECUTION_ERROR") && opened.Count == 1);
+
+        evaluator.RegisterHostFunction("test:custom-open", "openUrl", _ => throw new InvalidOperationException(secret));
+        Require(!evaluator.TryEvaluate(snapshot!, "/", untrusted, true, out _, out var hostFailure) &&
+            hostFailure?.Code == "ExecutionError" && !hostFailure.Message.Contains(secret, StringComparison.Ordinal));
+        var invalidPath = Decode($$$"""
+            {"version":"1.0","updateDataModel":{"surfaceId":"s","path":"/{{{secret}}}/constructor","value":true}}
+            """);
+        var failure = session.Apply(invalidPath);
+        Require(failure?.Code == "forbiddenPathKey" && !failure.ToString().Contains(secret, StringComparison.Ordinal));
+        var dateArguments = new Dictionary<string, JsonElement>
+        {
+            ["value"] = Json("\"2026-11-26\""),
+            ["format"] = Json("\"QQQQQQ\"")
+        };
+        Require(!BasicFunctions.TryInvoke("formatDate", dateArguments, out _, out var dateError) &&
+            dateError?.Message.Contains("QQQQQQ", StringComparison.Ordinal) == false);
+    }
 
     private static void CheckMountedAgentCalls()
     {

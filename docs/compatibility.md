@@ -167,3 +167,7 @@ Release build and local package smoke verification ran on Windows x64 with SDK 1
 | .NET 11 | Passed on 11.0.0 | Active STS |
 
 Microsoft tracks servicing independently of package compatibility. [Official .NET support policy](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core)
+
+## Host boundaries verification
+
+The pinned correctness run for upstream revision `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe` on .NET 8.0.34 for Windows x64 passed 597 Core and 689 Agent cases with no failures. Core passed 15 of 18 action cases, including local data mutation and redacted host execution failures. The three excluded action cases use 0.9 syntax. The [host boundary guide](host-boundaries.md) records the configurable limits and host responsibilities.

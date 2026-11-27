@@ -249,14 +249,14 @@ internal sealed class ExpressCompiler
         CallNode call => $"a call to {call.Name}(...)",
         CheckNode check => $"a check (?{check.Name})",
         VariableNode variable => $"the variable {variable.Name}",
-        PathNode path => $"the data binding ${path.Path}",
+        PathNode => "a data binding",
         SkippedNode => "'_'",
         PlainMap => "a map literal",
         List<object?> => "a list",
         null => "null",
-        bool flag => $"the boolean {(flag ? "true" : "false")}",
-        string text => $"the string {System.Text.Encoding.UTF8.GetString(PlainJson.ToUtf8(text))}",
-        long or double or decimal => $"the number {System.Text.Encoding.UTF8.GetString(PlainJson.ToUtf8(value))}",
+        bool => "a boolean",
+        string => "a string",
+        long or double or decimal => "a number",
         _ => $"a {value.GetType().Name}",
     };
 
@@ -891,7 +891,7 @@ internal sealed class ExpressCompiler
                 if (!enumValues.Any(choice => PlainJson.DeepEquals(choice, mapped)))
                 {
                     var allowed = System.Text.Encoding.UTF8.GetString(PlainJson.ToUtf8(enumValues));
-                    throw Invalid($"Value '{Describe(mapped)}' is not a valid enum choice for property '{propertyName}' of component '{name}'. Allowed values are: {allowed}");
+                    throw Invalid($"The value is not a valid enum choice for property '{propertyName}' of component '{name}'. Allowed values are: {allowed}");
                 }
             }
 

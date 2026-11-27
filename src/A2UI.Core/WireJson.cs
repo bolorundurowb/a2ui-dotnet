@@ -22,6 +22,18 @@ internal static class WireJson
     internal static string Path(string parent, string member) =>
         parent + "/" + member.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal);
 
+    internal static bool TryReadMessage(ReadOnlyMemory<byte> utf8, int maxEncodedBytes,
+        out JsonElement value, out A2uiDiagnostic? error)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxEncodedBytes);
+        if (utf8.Length <= maxEncodedBytes)
+            return TryRead(utf8, out value, out error);
+
+        value = default;
+        error = new("messageTooLarge", "", "The encoded A2UI message exceeds the byte limit.");
+        return false;
+    }
+
     internal static bool TryRead(ReadOnlyMemory<byte> utf8, out JsonElement value, out A2uiDiagnostic? error)
     {
         value = default;

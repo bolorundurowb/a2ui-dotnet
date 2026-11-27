@@ -48,9 +48,9 @@ internal static class RegexDialect
         {
             regex = new Regex(translated.ToString(), RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
         }
-        catch (ArgumentException error)
+        catch (ArgumentException)
         {
-            diagnostic = Failure("UNSUPPORTED_SYNTAX", "The pattern could not be translated: " + error.Message);
+            diagnostic = Failure("UNSUPPORTED_SYNTAX", "The pattern could not be translated.");
             return false;
         }
         return true;

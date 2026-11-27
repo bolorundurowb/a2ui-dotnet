@@ -19,8 +19,6 @@ internal static class OutboundCases
             "The fixture binds context with the v0.9 path syntax, which the 1.0 profile excludes.",
         (ActionFile, "test_action_direct_name_shorthand") =>
             "The fixture uses the v0.9 shorthand for an event action, which the 1.0 profile excludes.",
-        (ActionFile, "test_action_function_call_local_mutation_no_event_dispatched" or "test_action_function_call_execution_error") =>
-            "The fixture calls a host-registered function. The evaluator implements only the Basic Catalog functions.",
         _ => null
     };
 
@@ -110,12 +108,17 @@ internal static class OutboundCases
         var sourceId = Text(test, "sourceComponentId") ?? "source";
         var data = test.TryGetProperty("dataModel", out var model) ? model.GetRawText() : "{}";
         using var session = new SurfaceSession(registry);
-        var created = $$$"""{"version":"1.0","createSurface":{"surfaceId":"{{{surfaceId}}}","catalogId":"{{{CatalogRegistry.BasicCatalogId}}}","dataModel":{{{data}}}}}""";
+        var evaluator = new FunctionEvaluator(registry);
+        var catalogId = Text(test, "name") is "test_action_function_call_local_mutation_no_event_dispatched" or
+            "test_action_function_call_execution_error"
+            ? RegisterActionFunctions(registry, evaluator, session)
+            : CatalogRegistry.BasicCatalogId;
+        var created = $$$"""{"version":"1.0","createSurface":{"surfaceId":"{{{surfaceId}}}","catalogId":"{{{catalogId}}}","dataModel":{{{data}}}}}""";
         Require(WireMessage.TryDecode(Encoding.UTF8.GetBytes(created), WireDirection.AgentToRenderer, out var message, out var decodeError) &&
             session.Apply(message!) is null, decodeError?.ToString() ?? "The surface was rejected.");
         Require(session.TryGetSurface(surfaceId, out var surface) && surface is not null, "The surface is missing.");
 
-        var dispatcher = new ActionDispatcher(new FunctionEvaluator(registry));
+        var dispatcher = new ActionDispatcher(evaluator);
         var activation = !test.TryGetProperty("userActivation", out var flag) || flag.GetBoolean();
         JsonElement? metadata = test.TryGetProperty("metadata", out var extra) ? extra : null;
         var result = dispatcher.Dispatch(surface!, sourceId, Text(test, "scope") ?? "/", test.GetProperty("actionPayload"),
@@ -137,6 +140,9 @@ internal static class OutboundCases
         }
 
         Require(result.Error is null, $"Unexpected error: {result.Error}");
+        if (test.TryGetProperty("expectDataModel", out var expectedData))
+            Require(session.TryGetSurface(surfaceId, out var current) && NodeCases.JsonEquals(current!.DataModel, expectedData),
+                "The local host function did not produce the expected data model.");
         var dispatched = test.GetProperty("expectDispatched");
         if (dispatched.ValueKind == JsonValueKind.Null)
         {
@@ -163,6 +169,33 @@ internal static class OutboundCases
                     break;
             }
         }
+    }
+
+    private static string RegisterActionFunctions(CatalogRegistry registry, FunctionEvaluator evaluator, SurfaceSession session)
+    {
+        const string id = "test:action-functions";
+        const string catalog = """
+            {"catalogId":"test:action-functions","protocolVersion":"1.0","components":{},"functions":{
+              "incrementCounter":{"type":"object","returnType":"void","properties":{"@call":{"const":"incrementCounter"},
+                "args":{"type":"object","properties":{"path":{"type":"string"},"step":{"type":"number"}},"required":["path","step"]}},
+                "required":["@call","args"]},
+              "failingAction":{"type":"object","returnType":"void","properties":{"@call":{"const":"failingAction"},
+                "args":{"type":"object"}},"required":["@call","args"]}}}
+            """;
+        Require(registry.TryRegister(Encoding.UTF8.GetBytes(catalog), out var diagnostic),
+            diagnostic?.ToString() ?? "The local action catalog was rejected.");
+        evaluator.RegisterHostFunction(id, "incrementCounter", call =>
+        {
+            var path = call.Args["path"].GetString()!;
+            Require(session.TryGetSurface(call.SurfaceId, out var surface), "The surface is missing.");
+            Require(surface!.TryGetData(path, out var current), "The counter is missing.");
+            var updated = JsonSerializer.SerializeToElement(current.GetInt32() + call.Args["step"].GetInt32());
+            var problem = session.WriteData(call.SurfaceId, path, updated);
+            Require(problem is null, problem?.ToString() ?? "The counter write failed.");
+            return default;
+        });
+        evaluator.RegisterHostFunction(id, "failingAction", _ => throw new InvalidOperationException("Fixture host failure."));
+        return id;
     }
 
     private static string? Text(JsonElement owner, string name) =>
