@@ -170,6 +170,30 @@ foreach ($major in 8..11) {
     }
 }
 
+# Run the actual quickstart snippets against the local feed used by package consumers.
+foreach ($example in 'core', 'agent', 'rpc') {
+    $package = if ($example -eq 'core') { 'A2UI.Core' } else { 'A2UI.Agent' }
+    $guide = Get-Content -Raw -LiteralPath (Join-Path $repository "docs/usage/$example.md")
+    $blocks = [regex]::Matches($guide, '(?ms)^```csharp\r?\n(.*?)^```\s*$')
+    if ($blocks.Count -ne 1) { throw "Expected one runnable C# example in $example.md." }
+
+    $consumer = Join-Path $run "examples/$example"
+    New-Item -ItemType Directory -Path $consumer -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $consumer 'Program.cs') -Value $blocks[0].Groups[1].Value
+    $project = Join-Path $consumer 'Example.csproj'
+    Copy-Item -LiteralPath (Join-Path $repository 'tests/PackageSmoke/PackageSmoke.csproj') -Destination $project
+    $properties = @(
+        "-p:SmokePackage=$package"
+        "-p:SmokeVersion=$version"
+        "-p:RuntimeFrameworkVersion=$($versions[8])"
+        '-p:UseAppHost=false'
+    )
+    Invoke-DotNet restore $project @properties --source $feed --packages (Join-Path $consumer 'packages') --no-http-cache --force
+    $published = Join-Path $consumer 'publish'
+    Invoke-DotNet publish $project @properties --no-restore --no-self-contained -c Release -o $published
+    Invoke-DotNet exec --roll-forward Disable (Join-Path $published 'Example.dll')
+}
+
 if ($InteropPython) {
     $consumer = Join-Path $run 'interop'
     New-Item -ItemType Directory -Path $consumer | Out-Null

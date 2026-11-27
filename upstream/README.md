@@ -1,6 +1,6 @@
 # Upstream A2UI baseline
 
-[The manifest](a2ui-baseline.json) pins the protocol, schemas, Basic Catalog and examples, candidate optional catalogs, module blueprints, Core and Agent conformance suites and shared fixture data to a single commit. Both Python peer SDK release tags resolve to that commit. Their released packages are designated for interoperability verification. The tag check establishes source provenance. Running the peer packages is part of the interoperability milestone.
+[The manifest](a2ui-baseline.json) pins the protocol, schemas, Basic Catalog and examples, candidate optional catalogs, module blueprints, Core and Agent conformance suites and shared fixture data to a single commit. Both Python peer SDK release tags resolve to that commit. Their released packages are designated for interoperability verification. The tag check establishes source provenance. The [interoperability replay](../tests/Interop/README.md) runs the published packages against the .NET SDKs built from the local feed.
 
 ## Fetch and refresh
 

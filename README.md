@@ -11,12 +11,12 @@ The conformance badge shows the passing correctness and scaling cases out of the
 
 The packable SDK projects target `net8.0`. The [stable release profile](docs/compatibility.md) lists planned A2UI 1.0 coverage and verification status. See the [contribution guide](CONTRIBUTING.md#build-and-verify) for build and package smoke commands.
 
-| Planned package | Responsibility |
+| Package | Responsibility |
 | --- | --- |
 | `A2UI.Core` | Protocol messages, catalogs, validation, surface state, and data binding |
 | `A2UI.Agent` | Catalog negotiation, prompt generation, and compilation of streamed model output into validated A2UI messages |
 
-The first milestone is a scripted form that verifies .NET Agent and Core interoperability with upstream SDKs in a headless test. The SDKs will use the .NET base class library where practical, with MIT-licensed third-party libraries only. The target is .NET 8 through 11 compatibility, with .NET 9 as the minimum if the .NET 8 feasibility check identifies a blocker.
+The [SDK usage guide](docs/usage/README.md) covers local package installation, Core and Agent quickstarts, RPC and deployment. The [headless replay](tests/Interop/README.md) verifies the scripted appointment form with the pinned Python peers. The [ASP.NET Core sample](samples/AspNetCoreSse/README.md) demonstrates SSE delivery and an HTTP action return channel.
 
 ## Contributing
 
