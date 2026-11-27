@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)][string] $Runtime,
     [Parameter(Mandatory)][string] $Assets,
-    [string] $OutputDirectory = 'artifacts/core-scaling'
+    [string] $OutputDirectory = 'artifacts/core-scaling',
+    [switch] $WaitForIdle
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,7 +20,20 @@ function Get-ProcessorLoad {
         ForEach-Object { [math]::Round($_.CounterSamples[0].CookedValue, 1) }
 }
 
+function Test-Idle([double[]] $samples) {
+    $samples.Count -eq 5 -and @($samples | Sort-Object)[2] -le 10
+}
+
 $before = @(Get-ProcessorLoad)
+$attempt = 1
+while ($WaitForIdle -and !(Test-Idle $before) -and $attempt -lt 12) {
+    $before = @(Get-ProcessorLoad)
+    $attempt++
+}
+if ($WaitForIdle -and !(Test-Idle $before)) {
+    throw "Processor load did not settle after ${attempt} sample sets: $($before -join ', ') percent."
+}
+
 dotnet --fx-version $Runtime $project $Assets $report --scaling | Tee-Object -FilePath $log
 $exitCode = $LASTEXITCODE
 $after = @(Get-ProcessorLoad)
@@ -29,10 +43,11 @@ $after = @(Get-ProcessorLoad)
     os = [Runtime.InteropServices.RuntimeInformation]::OSDescription
     architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
     logicalProcessors = [Environment]::ProcessorCount
+    idleSampleAttempts = $attempt
     cpuPercentBefore = $before
     cpuPercentAfter = $after
-    idleBefore = ($before.Count -eq 5 -and @($before | Sort-Object)[2] -le 10)
-    idleAfter = ($after.Count -eq 5 -and @($after | Sort-Object)[2] -le 10)
+    idleBefore = (Test-Idle $before)
+    idleAfter = (Test-Idle $after)
 } | ConvertTo-Json | Set-Content -Encoding utf8 $environment
 if ($exitCode -notin 0, 1 -or !(Test-Path -LiteralPath $report)) { throw "Scaling runner exited with $exitCode." }
 
