@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)][string]$CorrectnessReport,
     [Parameter(Mandatory)][string]$ScalingReport,
-    [Parameter(Mandatory)][string]$OutputPath
+    [Parameter(Mandatory)][string]$OutputPath,
+    [switch]$RequireReleasePass
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,8 +16,21 @@ if ($correctness.scaling -ne $false -or $scaling.scaling -ne $true -or
     throw 'Expected correctness and scaling reports for the same upstream inventory.'
 }
 
+if ($RequireReleasePass) {
+    if ($correctness.inventoryVersion -ne 1 -or $scaling.inventoryVersion -ne 1) {
+        throw 'Regenerate both reports with the current conformance runner before checking release readiness.'
+    }
+
+    $baselinePath = Join-Path $PSScriptRoot '../upstream/a2ui-baseline.json'
+    $baseline = Get-Content -Raw -LiteralPath $baselinePath | ConvertFrom-Json
+    if ($correctness.revision -cne $baseline.revision) {
+        throw 'The conformance reports do not use the pinned upstream revision.'
+    }
+}
+
 $passed = 0
 $failed = 0
+$pending = 0
 for ($index = 0; $index -lt $total; $index++) {
     $case = $correctness.results[$index]
     $timingCase = $scaling.results[$index]
@@ -24,8 +38,24 @@ for ($index = 0; $index -lt $total; $index++) {
         throw "Conformance inventories differ at row $index."
     }
 
+    if ($RequireReleasePass) {
+        $correctnessSkipped = $case.status -eq 'excluded' -and $case.reason -ceq 'Run mode excludes this case.'
+        $scalingSkipped = $timingCase.status -eq 'excluded' -and $timingCase.reason -ceq 'Run mode excludes this case.'
+        if ($correctnessSkipped -eq $scalingSkipped) {
+            throw "Expected exactly one run mode to apply to $($case.file) / $($case.id)."
+        }
+
+        $applicable = if ($correctnessSkipped) { $timingCase } else { $case }
+        if ($applicable.status -notin 'pass', 'fail', 'pending', 'excluded' -or
+            ($applicable.status -eq 'excluded' -and [string]::IsNullOrWhiteSpace($applicable.reason))) {
+            throw "Missing result or exclusion reason for $($case.file) / $($case.id)."
+        }
+    }
+
     if ($case.status -eq 'fail' -or $timingCase.status -eq 'fail') {
         $failed++
+    } elseif ($case.status -eq 'pending' -or $timingCase.status -eq 'pending') {
+        $pending++
     } elseif ($case.status -eq 'pass' -or $timingCase.status -eq 'pass') {
         $passed++
     }
@@ -60,4 +90,7 @@ $messageCenter = $labelWidth + [int]($messageWidth / 2)
 </svg>
 "@ | Set-Content -LiteralPath $OutputPath -Encoding utf8
 
-"$passed of $total upstream cases passed, $failed failed, and $($total - $passed - $failed) were excluded."
+"$passed of $total upstream cases passed, $failed failed, $pending are pending, and $($total - $passed - $failed - $pending) were excluded."
+if ($RequireReleasePass -and ($failed -gt 0 -or $pending -gt 0)) {
+    throw "Release conformance requires all applicable cases to pass. Resolve $failed failures and $pending pending cases."
+}

@@ -22,9 +22,26 @@ The first turn negotiates capabilities, creates the form and sends separate comp
 | Agent macros | Catalog-aware expansion with scoped IDs, nested macros and shared Core validation. | `MacroExpander` passes 45 of the 46 pinned macro cases that use a 1.0 envelope. The 24 v0.9 cases and one case that sends `"@catalogId": null` are excluded. See [Agent macros](#agent-macros). |
 | Trimming and Native AOT | Preserve support in the Core and Agent API design. Verify headless consumers for each claimed deployment target. | Windows x64 scaffold publish and execution passed for trimmed .NET 8 and Native AOT .NET 8 and 10. A trimmed .NET 8 Core package consumer and a .NET 8 Native AOT smoke application passed with the wire, catalog and surface APIs. Broader deployment verification is pending. |
 
+## Conformance release gate
+
+The stable release requires every applicable case to pass in the pinned
+correctness and scaling inventories. An exclusion has a specific profile or
+fixture reason. Pending cases stay applicable and block the release. The first
+stable profile excludes legacy A2UI v0.x, the experimental Atom and Elemental
+inference formats, and the optional typesafe builder, streamed answers and
+per-call validation configuration.
+
+| Pending coverage | Cases | Owner |
+| --- | ---: | --- |
+| Action dispatch through registered host functions | 2 | [#25](https://github.com/bolorundurowb/a2ui-dotnet/issues/25) |
+| Express response streaming | 41 | [#33](https://github.com/bolorundurowb/a2ui-dotnet/issues/33) |
+| Express prompt generation, request processor binding and skills | 35 | [#71](https://github.com/bolorundurowb/a2ui-dotnet/issues/71) |
+
+Run the release check using both reports. [Conformance commands](../CONTRIBUTING.md#pinned-conformance-and-schema-comparison)
+
 ## Core catalog verification
 
-The Release run against upstream revision `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe` passed 595 Core and 689 Agent cases on .NET 8.0.34 for Windows x64. It recorded 270 Core and 384 Agent exclusions, with no failures. The Core run includes all ten composition cases, the additional validator and recursion cases, and the out-of-scope `@index` check. The Agent total includes all four skill export cases in `conformance/agent/skill.yaml`.
+The Release run against upstream revision `d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe` passed 595 Core and 689 Agent cases on .NET 8.0.34 for Windows x64. It recorded 268 Core and 308 Agent exclusions, with 2 Core and 76 Agent cases pending and no failures. The Core run includes all ten composition cases, the additional validator and recursion cases, and the out-of-scope `@index` check. The Agent total includes all four skill export cases in `conformance/agent/skill.yaml`.
 
 | Coverage | Passed | Excluded |
 | --- | ---: | ---: |

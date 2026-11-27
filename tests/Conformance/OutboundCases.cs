@@ -19,8 +19,6 @@ internal static class OutboundCases
             "The fixture binds context with the v0.9 path syntax, which the 1.0 profile excludes.",
         (ActionFile, "test_action_direct_name_shorthand") =>
             "The fixture uses the v0.9 shorthand for an event action, which the 1.0 profile excludes.",
-        (ActionFile, "test_action_function_call_local_mutation_no_event_dispatched" or "test_action_function_call_execution_error") =>
-            "The fixture calls a host-registered function. The evaluator implements only the Basic Catalog functions.",
         _ => null
     };
 

@@ -43,16 +43,28 @@ foreach (var suite in new[] { "core", "agent" })
                 id is "test_scaling_process_single_component_messages_relaxed_v10" or "test_scaling_process_single_component_messages_composition_v10";
             var agentScaling = scaling && (path == "conformance/agent/direct_json/scaling.yaml" &&
                 !id.EndsWith("_v09", StringComparison.Ordinal) || path == "conformance/agent/express/scaling.yaml");
-            string? reason = (isScaling != scaling, version, path) switch
+            if (isScaling != scaling)
             {
-                (true, _, _) => "Run mode excludes this case.",
-                (_, _, MacroCases.Path) when MacroCases.IsLegacy(test) =>
+                results.Add(new(suite, path, id, version, "excluded", "Run mode excludes this case."));
+                continue;
+            }
+
+            if (ProfileCases.Classify(path, id) is { } classification)
+            {
+                results.Add(new(suite, path, id, version, classification.Status, classification.Reason));
+                continue;
+            }
+
+            const string Unclassified = "No conformance adapter or exclusion is registered for this case.";
+            string? reason = (version, path) switch
+            {
+                (_, MacroCases.Path) when MacroCases.IsLegacy(test) =>
                     "The case uses a v0.9 envelope. The suite defaults to v0.9 unless envelope_version names 1.0, and v0.9 is outside the profile.",
-                (_, "v0.8" or "v0.9" or "v0.9.1" or "0.8" or "0.9" or "0.9.1", _) => "Legacy protocol is outside the profile.",
-                (_, _, _) when path.StartsWith("conformance/agent/legacy/", StringComparison.Ordinal) => "Legacy protocol is outside the profile.",
-                (_, _, "conformance/core/adapter_conformance.yaml") => "Renderer adapter is outside the headless profile.",
+                ("v0.8" or "v0.9" or "v0.9.1" or "0.8" or "0.9" or "0.9.1", _) => "Legacy protocol is outside the profile.",
+                (_, _) when path.StartsWith("conformance/agent/legacy/", StringComparison.Ordinal) => "Legacy protocol is outside the profile.",
+                (_, "conformance/core/adapter_conformance.yaml") => "Renderer adapter is outside the headless profile.",
                 _ when runScaling || agentScaling => null,
-                (_, _, "conformance/core/message_processor_scaling.yaml") when id == "test_scaling_process_single_component_messages_v10" =>
+                (_, "conformance/core/message_processor_scaling.yaml") when id == "test_scaling_process_single_component_messages_v10" =>
                     "SurfaceSession requires topology validation and has no unchecked processing mode.",
                 _ when CoreCases.CatalogExclusion(path, test, id) is { } catalogReason => catalogReason,
                 _ when !scaling && CoreCases.Supports(path, id, test) => null,
@@ -61,37 +73,37 @@ foreach (var suite in new[] { "core", "agent" })
                 _ when !scaling && OutboundCases.Handles(path) => null,
                 _ when RpcCases.Handles(path) && RpcCases.ExclusionReason(path, id) is { } rpcReason => rpcReason,
                 _ when !scaling && RpcCases.Handles(path) => null,
-                (_, _, "conformance/core/functions.yaml" or "conformance/core/index_function.yaml")
+                (_, "conformance/core/functions.yaml" or "conformance/core/index_function.yaml")
                     when FunctionCases.ExclusionReason(path, test) is { } why => why,
-                (_, _, "conformance/core/data_context.yaml") => null,
-                (_, _, "conformance/core/accessibility.yaml") when id == "test_accessibility_v1_0_legacy_bare_accessibility_dual_read" =>
+                (_, "conformance/core/data_context.yaml") => null,
+                (_, "conformance/core/accessibility.yaml") when id == "test_accessibility_v1_0_legacy_bare_accessibility_dual_read" =>
                     "The pinned 1.0 component schema requires @accessibility. Core does not accept the transitional bare spelling.",
-                (_, _, "conformance/core/accessibility.yaml") when id == "test_accessibility_implicit_label_inference" =>
+                (_, "conformance/core/accessibility.yaml") when id == "test_accessibility_implicit_label_inference" =>
                     "Inferring accessible names from a platform's rendered controls belongs to renderer adapters.",
-                (_, _, "conformance/core/accessibility.yaml") => null,
-                (_, _, "conformance/core/node_resolution.yaml") when NodeCases.Supports(id) => null,
-                (_, _, "conformance/core/node_resolution.yaml") => NodeCases.ExclusionReason(test, assets),
-                (_, _, RendererFunctionCases.Path) when id == "test_call_renderer_function_checked_rejects_a_function_that_needs_user_activation" =>
+                (_, "conformance/core/accessibility.yaml") => null,
+                (_, "conformance/core/node_resolution.yaml") when NodeCases.Supports(id) => null,
+                (_, "conformance/core/node_resolution.yaml") => NodeCases.ExclusionReason(test, assets),
+                (_, RendererFunctionCases.Path) when id == "test_call_renderer_function_checked_rejects_a_function_that_needs_user_activation" =>
                     "The fixture pairs requiresUserActivation with rendererOrAgent. The pinned catalog schema only allows this requirement on rendererOnly functions.",
                 _ when !scaling && path == RendererFunctionCases.Path => null,
                 _ when !scaling && path == AgentFunctionCases.Path => null,
                 _ when !scaling && path == DataModelCases.Path => null,
-                (_, _, MacroCases.Path) when id == "36_surface_lifecycle_delete_recreate_and_null_catalog_id" =>
+                (_, MacroCases.Path) when id == "36_surface_lifecycle_delete_recreate_and_null_catalog_id" =>
                     "The case sends \"@catalogId\": null. The pinned message schema requires a string and Core rejects the null when it decodes the message, so the expander never sees it.",
                 _ when !scaling && path == MacroCases.Path => null,
                 _ when suite == "agent" && ExpressCases.ExclusionReason(path, test) is { } expressReason => expressReason,
                 _ when !scaling && suite == "agent" && ExpressCases.IsExpress(path, test) => null,
                 _ when !scaling && AgentCases.Supports(path, test) => null,
-                (_, _, "conformance/agent/direct_json/response_streaming.yaml") when test.GetProperty("args").GetRawText()
+                (_, "conformance/agent/direct_json/response_streaming.yaml") when test.GetProperty("args").GetRawText()
                     .Contains("catalog_v0_", StringComparison.Ordinal) => "Legacy protocol is outside the profile.",
-                (_, _, "conformance/agent/catalog_transformer.yaml") when id == "test_function_pruning_on_catalog_without_functions" =>
+                (_, "conformance/agent/catalog_transformer.yaml") when id == "test_function_pruning_on_catalog_without_functions" =>
                     "The source catalog fixture omits its ID. Registration requires a catalog identity before pruning.",
-                (_, _, "conformance/core/validator_v1_0.yaml") when id == "test_v10_uax31_invalid_identifier_error" =>
+                (_, "conformance/core/validator_v1_0.yaml") when id == "test_v10_uax31_invalid_identifier_error" =>
                     "The fixture requires UAX #31 component IDs. The pinned common types schema defines ComponentId as a string.",
-                (_, _, "conformance/core/message_processor_v1_0.yaml")
+                (_, "conformance/core/message_processor_v1_0.yaml")
                     when id == "test_v10_get_renderer_data_model_filters_by_surface_protocol_version" =>
                     "The fixture creates a v0.9 surface alongside a 1.0 surface. Core supports only 1.0.",
-                (_, _, "conformance/core/message_processor_v1_0.yaml") when id is
+                (_, "conformance/core/message_processor_v1_0.yaml") when id is
                     "test_v10_component_catalog_override" or "test_v10_components_naming_catalogs_on_surface_without_default" or
                     "test_v10_component_from_named_catalog_with_closed_schema_accepted" or
                     "test_v10_component_update_without_catalog_id_on_surface_without_default_errors" or
@@ -99,20 +111,18 @@ foreach (var suite in new[] { "core", "agent" })
                     "test_v10_component_naming_catalog_is_checked_against_that_catalog" or
                     "test_v10_update_components_mismatched_catalog_protocol_version_error" =>
                     "The fixture routes a component using bare catalogId. The pinned protocol uses @catalogId for component routing.",
-                (_, _, "conformance/core/message_processor_v1_0.yaml") when id is
+                (_, "conformance/core/message_processor_v1_0.yaml") when id is
                     "test_v10_update_components_stores_component_metadata" or "test_v10_update_components_replaces_component_metadata" or
                     "test_v10_update_components_omitted_metadata_clears_component_metadata" or
                     "test_v10_inline_catalog_id_and_metadata_standard_only_beside_inline_id" =>
                     "The fixture sends component metadata as bare metadata. The pinned protocol uses @metadata.",
-                (_, _, "conformance/core/reserved_keys.yaml") when id is
+                (_, "conformance/core/reserved_keys.yaml") when id is
                     "test_escaped_doubled_at_unescaping" or "test_escaped_doubled_at_metadata_unescaping" =>
                     null,
-                (_, _, "conformance/core/error_responses.yaml") =>
-                    "The case expects a renderer error message with a protocol error code. Mapping diagnostics to those messages belongs to structured errors (#14).",
-                _ => "Public API or fixture adapter is pending."
+                _ => Unclassified
             };
             if (reason is not null)
-                results.Add(new(suite, path, id, version, "excluded", reason));
+                results.Add(new(suite, path, id, version, reason == Unclassified ? "fail" : "excluded", reason));
             else
             {
                 try
@@ -167,7 +177,7 @@ foreach (var (file, skip, failure) in ExpressCases.RunGoldenCorpus(assets, run: 
         results.Add(new("agent", file, "test_express_specification_round_trip_" + Path.GetFileNameWithoutExtension(file), null, status, skip ?? failure?.Message));
     }
 
-File.WriteAllText(args[1], JsonSerializer.Serialize(new { revision, scaling, results },
+File.WriteAllText(args[1], JsonSerializer.Serialize(new { inventoryVersion = 1, revision, scaling, results },
     new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
 foreach (var group in results.GroupBy(result => (result.Suite, result.Status)))
     Console.WriteLine($"{group.Key.Suite} {group.Key.Status}: {group.Count()}");
