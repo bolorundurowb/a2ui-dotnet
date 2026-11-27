@@ -1,0 +1,50 @@
+name: Core scaling verification
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/core-scaling.yml'
+      - 'scripts/Measure-CoreScaling.ps1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core-scaling:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: ['8', '11']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            11.0.x
+      - name: Build the conformance runner
+        shell: pwsh
+        run: |
+          dotnet build tests/Conformance -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run Core scaling verification
+        shell: pwsh
+        env:
+          RUNTIME_MAJOR: ${{ matrix.runtime }}
+        run: |
+          $runtime = dotnet --list-runtimes |
+            Where-Object { $_ -match "^Microsoft\.NETCore\.App $env:RUNTIME_MAJOR\." } |
+            ForEach-Object { ($_ -split '\s+')[1] } |
+            Select-Object -Last 1
+          if (!$runtime) { throw "Missing .NET $env:RUNTIME_MAJOR runtime." }
+          $assets = ./scripts/Get-UpstreamBaseline.ps1
+          ./scripts/Measure-CoreScaling.ps1 -Runtime $runtime -Assets $assets -WaitForIdle
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-scaling-net${{ matrix.runtime }}
+          path: artifacts/core-scaling/
+          if-no-files-found: error
