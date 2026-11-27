@@ -1,0 +1,45 @@
+name: SDK performance baseline
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: ['8', '11']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            11.0.x
+      - name: Build the benchmark
+        run: dotnet build tests/Performance -c Release
+      - name: Measure SDK hot paths
+        shell: pwsh
+        env:
+          RUNTIME_MAJOR: ${{ matrix.runtime }}
+        run: |
+          $runtime = dotnet --list-runtimes |
+            Where-Object { $_ -match "^Microsoft\.NETCore\.App $env:RUNTIME_MAJOR\." } |
+            ForEach-Object { ($_ -split '\s+')[1] } |
+            Select-Object -Last 1
+          if (!$runtime) { throw "Missing .NET $env:RUNTIME_MAJOR runtime." }
+          dotnet --fx-version $runtime tests/Performance/bin/Release/net8.0/Performance.dll "artifacts/performance-$env:RUNTIME_MAJOR.json" $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-performance-net${{ matrix.runtime }}
+          path: artifacts/performance-${{ matrix.runtime }}.json
+          if-no-files-found: error

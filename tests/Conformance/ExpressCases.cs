@@ -55,13 +55,13 @@ internal static class ExpressCases
         }
     }
 
-    /// <summary>Decompiles and recompiles every Basic Catalog example and checks that the components survive.</summary>
+    /// <summary>Decompiles and recompiles every Basic Catalog example and checks the ordered messages.</summary>
     /// <param name="assets">The pinned upstream assets.</param>
     /// <param name="run">Whether to run the examples. When false, each one is listed as excluded for this run mode.</param>
     internal static IEnumerable<(string File, string? Skip, Exception? Failure)> RunGoldenCorpus(string assets, bool run)
     {
         var catalogs = new CatalogRegistry();
-        foreach (var file in Directory.EnumerateFiles(Path.Combine(assets, GoldenDirectory), "*.json").Order(StringComparer.Ordinal))
+        foreach (var file in GoldenFiles(assets))
         {
             var name = Path.GetFileName(file);
             string? skip = run ? null : "Run mode excludes this case.";
@@ -69,7 +69,7 @@ internal static class ExpressCases
             try
             {
                 if (run)
-                    skip = RoundTripExample(catalogs, JsonNode.Parse(File.ReadAllText(file))!.AsObject());
+                    RoundTripExample(catalogs, JsonNode.Parse(File.ReadAllText(file))!.AsObject());
             }
             catch (Exception error) when (error is InvalidDataException or InvalidOperationException or JsonException)
             {
@@ -80,129 +80,94 @@ internal static class ExpressCases
         }
     }
 
-    private static string? RoundTripExample(CatalogRegistry catalogs, JsonObject example)
+    internal static void ExportGoldenCorpus(string assets, string output)
     {
-        if (example["customComponents"] is not null)
-            return "The example uses custom components that the Basic Catalog does not define.";
-        var messages = example["messages"]?.AsArray() ?? [example];
-        var surfaceId = "main";
-        var catalogId = (string?)null;
-        var byId = new Dictionary<string, JsonObject>(StringComparer.Ordinal);
-        foreach (var message in messages.OfType<JsonObject>())
+        var catalogs = new CatalogRegistry();
+        var examples = GoldenFiles(assets).ToDictionary(
+            file => Path.GetFileName(file),
+            file => RoundTripExample(catalogs, JsonNode.Parse(File.ReadAllText(file))!.AsObject()),
+            StringComparer.Ordinal);
+        File.WriteAllText(output, JsonSerializer.Serialize(examples));
+    }
+
+    private static IEnumerable<string> GoldenFiles(string assets) =>
+        Directory.EnumerateFiles(Path.Combine(assets, GoldenDirectory), "*.json").Order(StringComparer.Ordinal);
+
+    private static GoldenRoundTrip RoundTripExample(CatalogRegistry catalogs, JsonObject example)
+    {
+        var input = example["messages"]?.AsArray() ?? throw new InvalidDataException("The example has no messages.");
+        var messages = new List<WireMessage>(input.Count);
+        foreach (var envelope in input)
         {
-            if (message["createSurface"] is JsonObject create)
+            Require(WireMessage.TryDecode(Encoding.UTF8.GetBytes(envelope!.ToJsonString()), WireDirection.AgentToRenderer,
+                out var wire, out var decodeError), decodeError?.ToString() ?? "Decoding failed.");
+            messages.Add(wire!);
+        }
+
+        var decompileError = Express.Decompile(messages, catalogs, out var text);
+        Require(decompileError is null, decompileError?.ToString() ?? "Decompilation failed.");
+        var compileError = Express.Compile(text, catalogs, out var recompiled);
+        Require(compileError is null, compileError?.ToString() ?? "Recompilation failed.");
+
+        var expected = NormaliseBasicCatalogExample(input);
+        var actual = JsonNode.Parse(DirectJson.Decompile(recompiled))!;
+        Require(EqualJson(expected, actual), "Round trip changed the messages. Got " + actual.ToJsonString());
+        return new GoldenRoundTrip(text, actual);
+    }
+
+    private static JsonArray NormaliseBasicCatalogExample(JsonArray input)
+    {
+        var expected = (JsonArray)input.DeepClone();
+        var create = expected[0]?["createSurface"]?.AsObject()
+            ?? throw new InvalidDataException("The Basic Catalog example must start by creating its surface.");
+
+        // The pinned Python round-trip test folds the initial same-surface updates into the create message.
+        // Preserve every later message and compare arrays in order, including component definitions.
+        var index = 1;
+        var canMerge = true;
+        while (index < expected.Count)
+        {
+            var message = expected[index]!;
+            if (canMerge && message["updateComponents"] is JsonObject components &&
+                JsonNode.DeepEquals(components["surfaceId"], create["surfaceId"]) && !create.ContainsKey("components"))
             {
-                surfaceId = (string?)create["surfaceId"] ?? surfaceId;
-                catalogId = (string?)create["catalogId"] ?? catalogId;
+                create["components"] = components["components"]!.DeepClone();
+                expected.RemoveAt(index);
+                continue;
             }
 
-            if (message["updateComponents"]?["components"] is JsonArray components)
-                foreach (var component in components.OfType<JsonObject>())
-                    if (component["id"] is JsonValue id)
-                        byId[(string)id!] = (JsonObject)component.DeepClone();
-        }
-
-        var reachable = ReachableFromRoot(byId);
-        if (reachable.Count == 0)
-            return "The example has no components.";
-
-        // Express component IDs must be identifiers, so hyphens become underscores and surfaces do not ask for the data model back.
-        var renamed = reachable.Keys.Where(id => id.Contains('-')).ToDictionary(id => id, id => id.Replace('-', '_'), StringComparer.Ordinal);
-        var expected = reachable.Values.Select(component => Rename(component, renamed)).ToList();
-        var create1 = new JsonObject
-        {
-            ["version"] = "1.0",
-            ["createSurface"] = new JsonObject
+            if (message["updateDataModel"] is JsonObject update && (string?)update["path"] is null or "" or "/")
             {
-                ["surfaceId"] = surfaceId,
-                ["catalogId"] = catalogId ?? "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json",
-                ["components"] = new JsonArray(expected.Select(component => component.DeepClone()).ToArray()),
-            },
-        };
-        Require(WireMessage.TryDecode(Encoding.UTF8.GetBytes(create1.ToJsonString()), WireDirection.AgentToRenderer,
-            out var wire, out var decodeError), decodeError?.ToString() ?? "Decode failed.");
-        Require(Express.Decompile([wire!], catalogs, out var text) is null, "Decompile failed.");
-        var issue = Express.Compile(text, catalogs, out var recompiled);
-        Require(issue is null, issue?.ToString() ?? "Recompile failed.");
+                if (canMerge && JsonNode.DeepEquals(update["surfaceId"], create["surfaceId"]) && update["value"] is JsonObject data)
+                {
+                    create["dataModel"] = data.DeepClone();
+                    expected.RemoveAt(index);
+                    continue;
+                }
 
-        var actual = new Dictionary<string, JsonNode>(StringComparer.Ordinal);
-        foreach (var message in recompiled)
-        {
-            Require(message.Kind is "createSurface" or "updateComponents", "Unexpected message " + message.Kind + ".");
-            var payload = JsonNode.Parse(message.Payload.GetRawText())!.AsObject();
-            Require((string?)payload["surfaceId"] == surfaceId, "Surface differs.");
-            foreach (var component in payload["components"]?.AsArray() ?? [])
-                actual[(string)component!["id"]!] = component!;
+                update["path"] = "/";
+            }
+
+            canMerge = false;
+            index++;
         }
 
-        Require(actual.Keys.Order(StringComparer.Ordinal).SequenceEqual(
-            expected.Select(component => (string)component["id"]!).Order(StringComparer.Ordinal)), "Component IDs differ.");
-        foreach (var component in expected)
-        {
-            var id = (string)component["id"]!;
-            Require(JsonNode.DeepEquals(actual[id], component), $"Component {id} differs.");
-        }
-
-        return null;
+        return expected;
     }
 
-    private static Dictionary<string, JsonObject> ReachableFromRoot(Dictionary<string, JsonObject> byId)
+    private static bool EqualJson(JsonNode? expected, JsonNode? actual) => (expected, actual) switch
     {
-        if (!byId.ContainsKey("root"))
-            return byId;
-        var reached = new HashSet<string>(StringComparer.Ordinal);
-        var pending = new Stack<string>(["root"]);
-        while (pending.Count > 0)
-        {
-            var id = pending.Pop();
-            if (!reached.Add(id))
-                continue;
-            foreach (var name in StringValues(byId[id], skipId: true).Where(byId.ContainsKey))
-                pending.Push(name);
-        }
+        (JsonObject left, JsonObject right) => left.Count == right.Count &&
+            left.All(pair => right.TryGetPropertyValue(pair.Key, out var value) && EqualJson(pair.Value, value)),
+        (JsonArray left, JsonArray right) => left.Count == right.Count &&
+            left.Zip(right).All(pair => EqualJson(pair.First, pair.Second)),
+        // JSON has one number type. The compiled Express form may spell 1188.0 as 1188.
+        (JsonValue left, JsonValue right) when left.TryGetValue<decimal>(out var expectedNumber) &&
+            right.TryGetValue<decimal>(out var actualNumber) => expectedNumber == actualNumber,
+        _ => JsonNode.DeepEquals(expected, actual),
+    };
 
-        return byId.Where(entry => reached.Contains(entry.Key)).ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
-    }
-
-    private static IEnumerable<string> StringValues(JsonNode? node, bool skipId = false)
-    {
-        switch (node)
-        {
-            case JsonValue value when value.TryGetValue<string>(out var text):
-                yield return text;
-                break;
-            case JsonObject map:
-                foreach (var entry in map.Where(entry => !skipId || entry.Key != "id"))
-                    foreach (var text in StringValues(entry.Value))
-                        yield return text;
-                break;
-            case JsonArray list:
-                foreach (var item in list)
-                    foreach (var text in StringValues(item))
-                        yield return text;
-                break;
-        }
-    }
-
-    private static JsonObject Rename(JsonObject component, Dictionary<string, string> renamed) => (JsonObject)Rename((JsonNode)component, renamed)!;
-
-    private static JsonNode? Rename(JsonNode? node, Dictionary<string, string> renamed)
-    {
-        switch (node)
-        {
-            case JsonValue value when value.TryGetValue<string>(out var text) && renamed.TryGetValue(text, out var replacement):
-                return JsonValue.Create(replacement);
-            case JsonObject map:
-                var copy = new JsonObject();
-                foreach (var entry in map)
-                    copy[entry.Key] = Rename(entry.Value, renamed);
-                return copy;
-            case JsonArray list:
-                return new JsonArray(list.Select(item => Rename(item, renamed)).ToArray());
-            default:
-                return node?.DeepClone();
-        }
-    }
+    private sealed record GoldenRoundTrip(string Express, JsonNode Messages);
 
     private static void CheckFraming(JsonElement test)
     {
