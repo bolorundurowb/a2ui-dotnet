@@ -48,11 +48,23 @@ public sealed class RendererMessageProcessor
     /// <param name="utf8">The complete renderer message.</param>
     /// <param name="cancellationToken">Cancellation requested by the host.</param>
     /// <returns>The routing outcome and any correlated reply.</returns>
-    public ValueTask<RendererMessageResult> ProcessAsync(ReadOnlyMemory<byte> utf8, CancellationToken cancellationToken = default)
+    public ValueTask<RendererMessageResult> ProcessAsync(ReadOnlyMemory<byte> utf8, CancellationToken cancellationToken = default) =>
+        ProcessAsync(utf8, WireMessage.DefaultMaxEncodedBytes, cancellationToken);
+
+    /// <summary>Routes one UTF-8 renderer envelope with a host-supplied byte limit.</summary>
+    /// <param name="utf8">The complete renderer message.</param>
+    /// <param name="maxEncodedBytes">The positive limit on the entire encoded envelope, including whitespace.</param>
+    /// <param name="cancellationToken">Cancellation requested by the host.</param>
+    /// <returns>The routing outcome and any correlated reply, or a diagnostic.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The byte limit is not positive.</exception>
+    public ValueTask<RendererMessageResult> ProcessAsync(ReadOnlyMemory<byte> utf8, int maxEncodedBytes,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!WireJson.TryRead(utf8, out var envelope, out var problem))
-            return ValueTask.FromResult(Reject(problem!.Path, problem.Message));
+        if (!WireJson.TryReadMessage(utf8, maxEncodedBytes, out var envelope, out var problem))
+            return ValueTask.FromResult(problem!.Code == "messageTooLarge"
+                ? new RendererMessageResult(false, Diagnostic: problem)
+                : Reject(problem.Path, problem.Message));
         if (!WireJson.IsObject(envelope) || !envelope.TryGetProperty("version", out var version) ||
             version.ValueKind != JsonValueKind.String || !version.ValueEquals(WireMessage.Version))
             return ValueTask.FromResult(Reject("/version", "Expected A2UI version 1.0."));
@@ -79,7 +91,7 @@ public sealed class RendererMessageProcessor
         };
         if (handler is null)
             return ValueTask.FromResult(new RendererMessageResult(false));
-        if (!WireMessage.TryDecode(utf8, WireDirection.RendererToAgent, out var message, out problem))
+        if (!WireMessage.TryDecode(utf8, WireDirection.RendererToAgent, maxEncodedBytes, out var message, out problem))
             return ValueTask.FromResult(Reject(problem!.Path, problem.Message));
         return RouteAsync(handler, message!, cancellationToken);
     }

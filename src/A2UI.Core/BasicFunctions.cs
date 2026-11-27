@@ -483,7 +483,7 @@ public static class BasicFunctions
             var field = Field(parts, symbol, count, weekday);
             if (field is null)
             {
-                error = $"Unsupported date pattern field '{new string(symbol, count)}'.";
+                error = "Unsupported date pattern field.";
                 return false;
             }
             output.Append(field);

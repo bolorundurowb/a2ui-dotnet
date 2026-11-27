@@ -321,7 +321,7 @@ internal sealed class ExpressDecompiler
             return integer.ToString(CultureInfo.InvariantCulture);
         var number = PlainJson.AsDouble(value);
         if (!double.IsFinite(number))
-            throw Invalid($"The number {number.ToString(CultureInfo.InvariantCulture)} has no Express notation.");
+            throw Invalid("The number has no Express notation.");
         var (digits, exponent) = ShortestDigits(Math.Abs(number));
         return EcmaScriptNotation(double.IsNegative(number), digits, exponent);
     }

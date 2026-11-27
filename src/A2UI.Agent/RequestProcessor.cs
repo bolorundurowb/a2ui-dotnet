@@ -27,6 +27,12 @@ public sealed class RequestProcessor
     /// <returns>The fresh renderer state bound to the selected catalogs.</returns>
     public RendererState CreateSession() => new(_catalogs);
 
+    /// <summary>Starts an isolated mirror with a component definition limit per surface.</summary>
+    /// <param name="maxComponentsPerSurface">The positive limit on component definitions per surface.</param>
+    /// <returns>The fresh renderer state bound to the selected catalogs.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The component limit is not positive.</exception>
+    public RendererState CreateSession(int maxComponentsPerSurface) => new(_catalogs, maxComponentsPerSurface);
+
     /// <summary>Creates a processor for messages sent by the renderer with the selected catalogs.</summary>
     /// <param name="functions">Host functions associated with the selected catalogs.</param>
     /// <param name="onAction">Optional callback for validated actions.</param>

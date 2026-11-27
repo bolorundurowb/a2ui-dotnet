@@ -37,8 +37,12 @@ public sealed class FunctionCallRouter : IDisposable
     private readonly FunctionEvaluator _functions;
     private readonly AgentFunctionClient? _agent;
     private readonly ActionDispatcher _actions;
+    private readonly int _maxCachedAgentAnswers;
     private readonly Dictionary<string, SurfaceState> _surfaces = new(StringComparer.Ordinal);
     private bool _disposed;
+
+    /// <summary>The default maximum number of settled agent answers cached per surface.</summary>
+    public const int DefaultMaxCachedAgentAnswers = 256;
 
     /// <summary>Creates a router for the surfaces of a session.</summary>
     /// <param name="session">The session that owns the surfaces. The router follows its changes until it is disposed.</param>
@@ -48,7 +52,21 @@ public sealed class FunctionCallRouter : IDisposable
     /// <param name="timeProvider">The clock for action timestamps. Defaults to <see cref="TimeProvider.System"/>.</param>
     public FunctionCallRouter(SurfaceSession session, CatalogRegistry catalogs, FunctionEvaluator functions,
         AgentFunctionClient? agent, TimeProvider? timeProvider = null)
+        : this(session, catalogs, functions, agent, DefaultMaxCachedAgentAnswers, timeProvider) { }
+
+    /// <summary>Creates a router with a host-supplied limit on settled agent answers per surface.</summary>
+    /// <param name="session">The session that owns the surfaces. The router follows its changes until it is disposed.</param>
+    /// <param name="catalogs">The registry that holds the catalogs the calls name.</param>
+    /// <param name="functions">The evaluator that runs the calls the renderer implements.</param>
+    /// <param name="agent">The client that sends calls to the agent. Without one, every call that needs the agent fails locally.</param>
+    /// <param name="maxCachedAgentAnswers">The positive limit on successful cached answers per surface. New answers evict the oldest settled answer.</param>
+    /// <param name="timeProvider">The clock for action timestamps. Defaults to <see cref="TimeProvider.System"/>.</param>
+    /// <exception cref="ArgumentOutOfRangeException">The cache limit is not positive.</exception>
+    public FunctionCallRouter(SurfaceSession session, CatalogRegistry catalogs, FunctionEvaluator functions,
+        AgentFunctionClient? agent, int maxCachedAgentAnswers, TimeProvider? timeProvider)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxCachedAgentAnswers);
+        _maxCachedAgentAnswers = maxCachedAgentAnswers;
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _catalogs = catalogs ?? throw new ArgumentNullException(nameof(catalogs));
         _functions = functions ?? throw new ArgumentNullException(nameof(functions));
@@ -253,6 +271,7 @@ public sealed class FunctionCallRouter : IDisposable
         state.Bindings.Clear();
         state.Operations.Clear();
         state.Cache.Clear();
+        state.SettledKeys.Clear();
         _agent?.CancelSurface(surfaceId);
     }
 
@@ -286,10 +305,18 @@ public sealed class FunctionCallRouter : IDisposable
             !state.Cache.TryGetValue(entry.Key, out var current) || !ReferenceEquals(current, entry))
             return;
 
+        var waiters = entry.Waiters.ToArray();
+        entry.Waiters.Clear();
         if (outcome.Succeeded)
         {
             entry.Settled = true;
             entry.Value = outcome.Value;
+            if (state.SettledKeys.Count == _maxCachedAgentAnswers)
+                state.Cache.Remove(state.SettledKeys.Dequeue());
+            state.SettledKeys.Enqueue(entry.Key);
+            foreach (var (binding, site) in waiters)
+                if (binding.AgentSites.TryGetValue(site, out var active) && active.Key == entry.Key)
+                    binding.AgentSites[site] = (entry.Key, entry.Value);
         }
         else
         {
@@ -298,12 +325,13 @@ public sealed class FunctionCallRouter : IDisposable
             if (IsCancellation(outcome))
                 return;
             entry.Failed = true;
-            foreach (var (binding, site) in entry.Waiters)
-                binding.FailedSites[site] = entry.Key;
+            foreach (var (binding, site) in waiters)
+                if (binding.AgentSites.TryGetValue(site, out var active) && active.Key == entry.Key)
+                    binding.FailedSites[site] = entry.Key;
             ReportAgentFailure(surfaceId, entry.CallId, outcome);
         }
 
-        foreach (var binding in entry.Waiters.Select(waiter => waiter.Binding).Distinct().ToArray())
+        foreach (var binding in waiters.Select(waiter => waiter.Binding).Distinct())
             Evaluate(binding);
     }
 
@@ -435,7 +463,7 @@ public sealed class FunctionCallRouter : IDisposable
                 name = name[1..];
             else if (name.StartsWith('@'))
                 return Outcome.Fail(FunctionValues.ExpressionError($"Unknown key '{name}'. Write '@{name}' for a literal key."));
-            members.Add((name, Eval(context, member.Value, site + "/" + name)));
+            members.Add((name, Eval(context, member.Value, WireJson.Path(site, name))));
         }
         return Combine(members, isObject: true);
     }
@@ -563,10 +591,18 @@ public sealed class FunctionCallRouter : IDisposable
     {
         var state = _surfaces[surfaceId];
         var key = string.Join('\n', catalogId, name, Canonical(arguments));
+        // Live expressions keep the answer for each unchanged call site, even when another answer evicts it
+        // from the shared cache. An expression can wait for more siblings than the cache can hold.
+        if (binding.AgentSites.TryGetValue(site, out var active) && active.Key == key &&
+            active.Value.ValueKind != JsonValueKind.Undefined)
+            return Outcome.Of(active.Value);
+        binding.AgentSites[site] = (key, default);
+
         state.Cache.TryGetValue(key, out var entry);
         if (entry is { Settled: true })
         {
             binding.FailedSites.Remove(site);
+            binding.AgentSites[site] = (key, entry.Value);
             return Outcome.Of(entry.Value);
         }
         if (binding.FailedSites.TryGetValue(site, out var failedKey))
@@ -592,7 +628,10 @@ public sealed class FunctionCallRouter : IDisposable
 
             // An in-process agent can answer inside Send, before this binding is registered as a waiter.
             if (entry.Settled)
+            {
+                binding.AgentSites[site] = (key, entry.Value);
                 return Outcome.Of(entry.Value);
+            }
             if (entry.Failed)
             {
                 binding.FailedSites[site] = key;
@@ -701,6 +740,7 @@ public sealed class FunctionCallRouter : IDisposable
     private sealed class SurfaceState
     {
         public Dictionary<string, CacheEntry> Cache { get; } = new(StringComparer.Ordinal);
+        public Queue<string> SettledKeys { get; } = new();
         public List<FunctionBinding> Bindings { get; } = [];
         public List<Operation> Operations { get; } = [];
     }
@@ -804,12 +844,16 @@ public sealed class FunctionBinding : IDisposable
     internal JsonElement Expression { get; }
     internal bool Managed { get; }
     internal bool Ended { get; private set; }
+    internal Dictionary<string, (string Key, JsonElement Value)> AgentSites { get; } = new(StringComparer.Ordinal);
     internal Dictionary<string, string> FailedSites { get; } = new(StringComparer.Ordinal);
     internal HashSet<string> Reported { get; } = new(StringComparer.Ordinal);
 
     internal void End()
     {
         Ended = true;
+        AgentSites.Clear();
+        FailedSites.Clear();
+        Reported.Clear();
         Changed = null;
     }
 

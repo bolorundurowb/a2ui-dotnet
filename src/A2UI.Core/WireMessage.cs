@@ -34,6 +34,9 @@ public sealed class WireMessage
 
     /// <summary>The supported A2UI wire protocol version.</summary>
     public const string Version = "1.0";
+
+    /// <summary>The default maximum number of UTF-8 bytes in an encoded A2UI message (4 MiB).</summary>
+    public const int DefaultMaxEncodedBytes = 4 * 1024 * 1024;
     /// <summary>The direction associated with this envelope.</summary>
     public WireDirection Direction { get; }
     /// <summary>The wire property naming the operation represented by this envelope.</summary>
@@ -50,10 +53,22 @@ public sealed class WireMessage
     /// <param name="diagnostic">The validation failure, if any.</param>
     /// <returns>Whether the envelope was decoded. Catalog-specific checks require surface context.</returns>
     public static bool TryDecode(ReadOnlyMemory<byte> utf8, WireDirection direction,
+        out WireMessage? message, out A2uiDiagnostic? diagnostic) =>
+        TryDecode(utf8, direction, DefaultMaxEncodedBytes, out message, out diagnostic);
+
+    /// <summary>Reads and validates one UTF-8 wire envelope with a host-supplied byte limit.</summary>
+    /// <param name="utf8">The complete JSON envelope.</param>
+    /// <param name="direction">The expected direction of the message.</param>
+    /// <param name="maxEncodedBytes">The positive limit on the entire encoded envelope, including whitespace.</param>
+    /// <param name="message">The owned message on success.</param>
+    /// <param name="diagnostic">The validation failure, or <c>messageTooLarge</c> when the input exceeds the limit.</param>
+    /// <returns>Whether the envelope was decoded.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The byte limit is not positive.</exception>
+    public static bool TryDecode(ReadOnlyMemory<byte> utf8, WireDirection direction, int maxEncodedBytes,
         out WireMessage? message, out A2uiDiagnostic? diagnostic)
     {
         message = null;
-        if (!WireJson.TryRead(utf8, out var envelope, out diagnostic))
+        if (!WireJson.TryReadMessage(utf8, maxEncodedBytes, out var envelope, out diagnostic))
             return false;
         if (!WireJson.IsObject(envelope))
             return Reject("invalidEnvelope", "", "Expected a JSON object.", out diagnostic);

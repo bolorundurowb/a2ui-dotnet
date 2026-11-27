@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using A2UI.Agent;
@@ -503,6 +504,56 @@ internal static class AgentSmoke
             throw new InvalidOperationException("Express accepted an unclosed call.");
     }
 
+    private static void CheckHostPolicies()
+    {
+        const string secret = "private-value-938657";
+        var catalogs = new CatalogRegistry();
+        using var capability = JsonDocument.Parse($$$"""
+            {"1.0":{"supportedCatalogIds":["{{{CatalogRegistry.BasicCatalogId}}}"],"inlineCatalogs":[
+                {"protocolVersion":"1.0","catalogId":"test:inline-limit","components":{}}
+            ]}}
+            """);
+        if (!CatalogNegotiation.TryResolve(catalogs, capability.RootElement, false, out var disabled, out _) ||
+            disabled!.TryGetDefinition("test:inline-limit", out _) ||
+            !CatalogNegotiation.TryResolve(catalogs, capability.RootElement, true, out var enabled, out _) ||
+            !enabled!.TryGetDefinition("test:inline-limit", out _) ||
+            catalogs.TryGetDefinition("test:inline-limit", out _))
+            throw new InvalidOperationException("The inline catalog did not remain behind the opt-in and request boundaries.");
+
+        if (RequestProcessor.Fixed(catalogs, out var requests) is { } requestError)
+            throw new InvalidOperationException(requestError.ToString());
+        using var mirror = requests!.CreateSession(maxComponentsPerSurface: 1);
+        var tooMany = Decode($$$"""
+            {"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"{{{CatalogRegistry.BasicCatalogId}}}",
+             "components":[{"id":"root","component":"Text","text":"Root"},{"id":"extra","component":"Text","text":"Extra"}]}}
+            """);
+        if (mirror.Prepare([tooMany], out var turn) is null || turn is not null || mirror.TryGetSurface("s", out _))
+            throw new InvalidOperationException("The isolated agent mirror accepted too many component definitions.");
+
+        var callbacks = 0;
+        var processor = requests.CreateMessageProcessor(onAction: (_, _) =>
+        {
+            callbacks++;
+            return ValueTask.FromResult(true);
+        });
+        var action = Encoding.UTF8.GetBytes($$$$"""
+            {"version":"1.0","action":{"name":"submit","surfaceId":"s","sourceComponentId":"button",
+             "timestamp":"2026-11-26T00:00:00Z","context":{"note":"{{{{secret}}}}"}}}
+            """);
+        var oversized = processor.ProcessAsync(action, action.Length - 1, default).GetAwaiter().GetResult();
+        if (oversized.Handled || oversized.Diagnostic?.Code != "messageTooLarge" ||
+            oversized.Diagnostic.ToString().Contains(secret, StringComparison.Ordinal) || callbacks != 0 ||
+            !processor.ProcessAsync(action, action.Length, default).GetAwaiter().GetResult().Handled || callbacks != 1)
+            throw new InvalidOperationException("Inbound action size enforcement or redaction failed.");
+
+        var express = Express.Compile($"root = Text(\"valid\" \"{secret}\")", catalogs, out _);
+        if (express?.Code != "ParseError" || express.Message.Contains(secret, StringComparison.Ordinal))
+            throw new InvalidOperationException("An Express parse diagnostic exposed the supplied string.");
+        var expressEnum = Express.Compile($"root = Text(\"valid\", variant=\"{secret}\")", catalogs, out _);
+        if (expressEnum?.Code != "ValidationError" || expressEnum.Message.Contains(secret, StringComparison.Ordinal))
+            throw new InvalidOperationException("An Express validation diagnostic exposed the supplied string.");
+    }
+
     internal static void Run()
     {
         CheckMacros();
@@ -514,6 +565,7 @@ internal static class AgentSmoke
         CheckRendererFunctionCall();
         CheckStreaming();
         CheckStreamingBackpressure().GetAwaiter().GetResult();
+        CheckHostPolicies();
         using var mirror = new RendererState(new CatalogRegistry());
         const string response = """Hello <a2ui-json>{"version":"1.0","createSurface":{"surfaceId":"form"}}</a2ui-json> Done""";
         var issue = DirectJson.ParseResponse(response, mirror, out var parts, out var candidate);

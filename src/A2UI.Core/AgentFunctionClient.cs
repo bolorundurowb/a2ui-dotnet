@@ -47,11 +47,14 @@ public sealed class AgentFunctionClient : IDisposable
     private readonly int _maxPendingCalls;
     private bool _disposed;
 
-    /// <summary>Creates a client.</summary>
+    /// <summary>The default maximum number of pending agent function calls per client.</summary>
+    public const int DefaultMaxPendingCalls = 256;
+
+    /// <summary>Creates a client with the default concurrent call limit.</summary>
     /// <param name="send">Sends a message to the agent. A null value means the renderer has no way to reach the agent, so every call fails with <c>NO_LISTENER</c>.</param>
     /// <param name="timeProvider">The clock for call timeouts. Defaults to <see cref="TimeProvider.System"/>.</param>
     public AgentFunctionClient(Action<WireMessage>? send, TimeProvider? timeProvider = null)
-        : this(send, int.MaxValue, timeProvider)
+        : this(send, DefaultMaxPendingCalls, timeProvider)
     {
     }
 

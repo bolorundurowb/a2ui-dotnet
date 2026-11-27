@@ -373,10 +373,7 @@ internal static partial class ExpressSyntax
             var start = position;
             var (kind, end) = ReadToken(text, position);
             if (end <= position)
-            {
-                var character = char.ConvertFromUtf32(char.ConvertToUtf32(text, position));
-                throw ExpressException.Parse($"Syntax error at line {line}:{column}: token recognition error at: '{character}'");
-            }
+                throw ExpressException.Parse($"Syntax error at line {line}:{column}: unrecognised token.");
             var value = text[start..end];
             if (kind == TokenKind.Identifier)
             {
@@ -637,7 +634,7 @@ internal static partial class ExpressSyntax
     internal static object ParseNumber(string text)
     {
         if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) || !double.IsFinite(number))
-            throw ExpressException.Parse($"Number literal {text} is out of range.");
+            throw ExpressException.Parse("Number literal is out of range.");
         if (text.AsSpan().IndexOfAny('.', 'e', 'E') >= 0)
             return number;
         if (long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var integer))
@@ -823,7 +820,15 @@ internal static partial class ExpressSyntax
             return new CallNode(name, args, kwargs);
         }
 
-        private static string Describe(Token token) => token.Kind == TokenKind.End ? "the end of the input" : $"'{token.Text}'";
+        private static string Describe(Token token) => token.Kind switch
+        {
+            TokenKind.End => "the end of the input",
+            TokenKind.Number => "a number",
+            TokenKind.String => "a string",
+            TokenKind.Boolean => "a boolean",
+            TokenKind.Path => "a data binding",
+            _ => $"'{token.Text}'"
+        };
 
         private ExpressException Error(string message) =>
             ExpressException.Parse($"Syntax error at line {Current.Line}:{Current.Column}: {message}");

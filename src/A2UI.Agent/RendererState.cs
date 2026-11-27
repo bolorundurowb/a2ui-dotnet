@@ -11,9 +11,15 @@ public sealed class RendererState : IDisposable
 
     /// <summary>Creates an empty mirror.</summary>
     /// <param name="catalogs">The configured request-local catalog registry.</param>
-    public RendererState(CatalogRegistry catalogs)
+    public RendererState(CatalogRegistry catalogs) : this(catalogs, SurfaceSession.DefaultMaxComponentsPerSurface) { }
+
+    /// <summary>Creates an empty mirror with a component definition limit per surface.</summary>
+    /// <param name="catalogs">The configured request-local catalog registry.</param>
+    /// <param name="maxComponentsPerSurface">The positive limit on component definitions per surface.</param>
+    /// <exception cref="ArgumentOutOfRangeException">The component limit is not positive.</exception>
+    public RendererState(CatalogRegistry catalogs, int maxComponentsPerSurface)
     {
-        _session = new(catalogs);
+        _session = new(catalogs, GraphValidationOptions.Progressive, maxComponentsPerSurface);
         Catalogs = catalogs;
     }
 
