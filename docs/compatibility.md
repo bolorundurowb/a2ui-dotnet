@@ -115,6 +115,17 @@ The harness reads `envelope_version` for each case. A case that names only a `ve
 
 Focused regression checks in the package smoke test cover ID namespacing and order, the depth and size limits, passthrough and raise modes, the reserved `Surface` name and the default macro catalog rewrite. They also check that the generated catalogs register in Core and that the expansion passes `RendererState.Prepare`. The trimmed .NET 8 and Native AOT .NET 8 deployment smoke runs include them and produced no analyser warnings. [Pinned macro cases](https://github.com/a2ui-project/a2ui/blob/d63fd4306da7c3ffb0c8d2b5d5ef5d4507605dbe/conformance/agent/macros/macros.yaml)
 
+## SDK performance
+
+The [SDK performance workflow](../.github/workflows/performance.yml) runs Release benchmarks on separate Windows x64 runners for .NET 8 and .NET 11. Each job publishes a JSON report with the revision, runtime, operating system, architecture, processor count and GC mode. Use the reports for the same runtime and runner configuration when comparing revisions.
+
+The benchmark creates a Basic Catalog surface with a column and either 8 or 128 text rows. Core measures decoding and applying 24 single-leaf updates to an existing surface. Agent measures batch compilation of the create message and the same 24 updates, and separately measures the time to emit the create message from a framed response fed in 128-character chunks. The streaming measurement starts at the first chunk, after the parser and renderer state are constructed.
+
+The report gives median time and managed bytes allocated on the calling thread per operation, with two warm-up passes and seven measured passes. Batch and update operations also report UTF-8 bytes and messages per second. For first-message latency, the report covers SDK processing without transport or model delay.
+
+Treat a median latency increase or throughput decrease of 15% or more, or an allocation increase of 10% or more, as a regression to investigate. Confirm it in repeat runs of both revisions on the same otherwise idle machine before drawing a conclusion. Hosted runners vary in speed, so the workflow publishes the measurements without enforcing these thresholds across jobs.
+
+
 ## Optional integrations
 
 | Capability | Planned scope |

@@ -118,6 +118,20 @@ in the same PR. To regenerate it locally from the reports above, run:
 ./scripts/New-ConformanceBadge.ps1 artifacts/conformance.json artifacts/conformance-scaling.json docs/conformance-badge.svg
 ```
 
+## SDK performance baseline
+
+Run the benchmark in Release on an otherwise idle machine. Select installed runtime versions with `dotnet --list-runtimes`. Run each runtime in its own process.
+
+```powershell
+dotnet build tests/Performance -c Release
+$revision = git rev-parse HEAD
+dotnet --fx-version 8.0.34 tests/Performance/bin/Release/net8.0/Performance.dll artifacts/performance-8.json $revision
+dotnet --fx-version 11.0.0 tests/Performance/bin/Release/net8.0/Performance.dll artifacts/performance-11.json $revision
+```
+
+See the [benchmark workloads and regression thresholds](docs/compatibility.md#sdk-performance).
+
+
 ## Trimming and Native AOT
 
 Both SDKs run trim and AOT analysis. Prefer source-generated `System.Text.Json` metadata and explicit registration of catalog and host types. If reflection needs to access members of a caller-supplied type, use `DynamicallyAccessedMembers` with the smallest required member set. Use `RequiresUnreferencedCode` or `RequiresDynamicCode` at an API boundary when an operation cannot satisfy the corresponding deployment mode. Preserve annotations when forwarding types and investigate warnings before using a suppression. [Microsoft trimming guidance](https://learn.microsoft.com/en-us/dotnet/core/deploying/trimming/prepare-libraries-for-trimming)
