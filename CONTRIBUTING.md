@@ -61,7 +61,10 @@ Run the correctness and scaling inventory separately. The JSON reports include
 the upstream revision, case IDs, protocol versions when supplied by the suite,
 and a status and reason for each case. The scaling run times the two pinned Core
 progressive processor workloads through the UTF-8 codec and session. Run it
-on an otherwise idle machine. Cases with unavailable SDK behavior have explicit exclusions.
+on an otherwise idle machine. The reports mark applicable cases awaiting a
+feature or test adapter as pending and name the owning issue. Unclassified
+cases fail the run. Exclusions give a specific reason, such as a legacy
+protocol version or an upstream fixture disagreement.
 
 ```powershell
 $assets = ./scripts/Get-UpstreamBaseline.ps1
@@ -105,13 +108,22 @@ try {
 ```
 
 The conformance workflow uploads both case reports and a refreshed badge.
-The badge counts each upstream case once and includes excluded cases in the
+The badge counts each upstream case once and includes pending and excluded cases in the
 total. The badge colour reflects the percentage passing, with bands starting
 at 50%, 80%, 90% and 100%. When a change affects conformance counts, include the refreshed SVG
 in the same PR. To regenerate it locally from the reports above, run:
 
 ```powershell
 ./scripts/New-ConformanceBadge.ps1 artifacts/conformance.json artifacts/conformance-scaling.json docs/conformance-badge.svg
+```
+
+Before publishing a stable release, check both reports against the pinned
+revision. The release check requires every applicable case to pass and rejects
+pending features and timing failures. The ordinary CI report keeps these
+results visible while the remaining stable features are in development.
+
+```powershell
+./scripts/New-ConformanceBadge.ps1 artifacts/conformance.json artifacts/conformance-scaling.json artifacts/conformance-badge.svg -RequireReleasePass
 ```
 
 ## SDK performance baseline

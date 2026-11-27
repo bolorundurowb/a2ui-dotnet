@@ -49,7 +49,7 @@ internal static class CoreCases
             "test_v10_catalog_from_json_leaf_defs" =>
                 "The fixture uses metadata.displayName, which the pinned catalog schema does not allow.",
             "test_catalog_from_json_override_catalog_id" => "The registry uses the document identity and has no catalog ID override.",
-            "test_v10_catalog_from_json_filters_entries_by_unions" => "The registry retains declared entries. Union-based transformation belongs to #67.",
+            "test_v10_catalog_from_json_filters_entries_by_unions" => "The registry retains explicitly declared entries. This fixture treats the unions as filters at registration.",
             "test_v10_catalog_from_json_v1_0_attributes" or
             "test_v10_catalog_from_json_user_activation_renderer_only" or
             "test_v10_catalog_from_json_uax31_validation" or
